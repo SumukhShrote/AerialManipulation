@@ -23,7 +23,7 @@ from omni.isaac.lab.markers import VisualizationMarkers, VisualizationMarkersCfg
 from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR
 
 from utils.assets import MODELS_PATH
-from configs.aerial_manip_asset import CRAZYFLIE_MANIPULATOR_0DOF_CFG, CRAZYFLIE_MANIPULATOR_0DOF_LONG_CFG, CRAZYFLIE_BRUSHLESS_CFG
+from configs.aerial_manip_asset import CRAZYFLIE_MANIPULATOR_0DOF_CFG, CRAZYFLIE_MANIPULATOR_0DOF_LONG_CFG, CRAZYFLIE_BRUSHLESS_CFG, CRAZYFLIE_BRUSHLESS_MANIPULATOR_CFG
 from utils.math_utilities import yaw_from_quat, yaw_error_from_quats, quat_from_yaw, compute_desired_pose_from_transform, vee_map, exp_so3, hat_map
 import utils.flatness_utilities as flatness_utils
 import utils.trajectory_utilities as traj_utils
@@ -67,7 +67,6 @@ class QuadrotorEnvCfg(DirectRLEnvCfg):
     state_space = 0
     debug_vis = True
     sim_rate_hz = 1000
-    sim_rate_hz = 100
     policy_rate_hz = 100
     pd_loop_rate_hz = 100
     decimation = sim_rate_hz // policy_rate_hz
@@ -161,12 +160,16 @@ class QuadrotorEnvCfg(DirectRLEnvCfg):
     rotorpy_obs = False
     rotorpy_reward = False
     rotorpy_done = False
-    action_history_length = 3
+    action_history_length = 1
     state_history_length = 0
 
     # reward scales
     pos_distance_reward_scale = 15.0
     pos_radius = 0.8
+    pos_corse_reward_scale = 0.0
+    pos_corse_radius = 0.8
+    pos_fine_reward_scale= 0.0
+    pos_fine_radius = 0.1
     pos_radius_curriculum = 50_000_000
     pos_error_reward_scale= 0.0
     lin_vel_reward_scale = -0.05
@@ -304,10 +307,10 @@ class BrushlessQuadrotorEnvCfg(QuadrotorEnvCfg):
     robot: ArticulationCfg = CRAZYFLIE_BRUSHLESS_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
     thrust_to_weight = 3.5
-    mass = 0.040 # 39 grams
-    Ixx = 3e-5
-    Iyy = 3e-5
-    Izz = 3.5e-5
+    mass = 0.041 # 39 grams
+    Ixx = 1.5417e-5
+    Iyy = 1.5904e-5
+    Izz = 2.869e-5
     sim_rate_hz = 1000
     decimation = 10 # 10x decimation from sim physics rate
     pd_loop_rate_hz = 500
@@ -332,22 +335,24 @@ class BrushlessQuadrotorEnvCfg(QuadrotorEnvCfg):
 
     # Motor dynamics
     arm_length = 0.05
-    k_eta = 4.81e-8 # Measured from thrust stand data
+    k_eta = 0.31615 # Measured from thrust stand data
     k_m = 7.8e-10 #unchanged
-    k_torque = 0.0 # Computed from sysID
-    tau_m = 0.017 # slower motor dynamics
+    k_torque = 2.567e-3 # Computed from sysID
+    tau_m = 0.045 # slower motor dynamics
     motor_speed_min = 0.0
-    motor_speed_max = 2500.0
-    init_motor_speed = 1000.0 # should be 0.1 if using SRT control mode
+    motor_speed_max = 1.0
+    init_motor_speed = 0.1 # should be 0.1 if using SRT control mode
 
     kp_att = 3264.54 # 544
     kd_att = 361.58 # 46.64
 
     # CTBR Parameters
-    kp_omega = 5.27 # measured on static test stand
-    kd_omega = 1.0
-    body_rate_scale_xy = 10.0
-    body_rate_scale_z = 2.5
+    # kp_omega = 5.27 # measured on static test stand
+    # kd_omega = 1.0
+    kp_omega = 75.0 # measured from real-data
+    kd_omega = 10.0
+    body_rate_scale_xy = 6.28319
+    body_rate_scale_z = 1.5708
 
     control_mode = "CTBR" # "CTBM" or "CTATT" or "CTBR" or "SRT"
 
@@ -374,25 +379,74 @@ class BrushlessQuadrotorManipulatorEnvCfg(QuadrotorEnvCfg):
     """
     Cfg for the brushless quadrotor environment simulating the Brushless Crazyflie 2.1 with a manipulator
     """
+    robot: ArticulationCfg = CRAZYFLIE_BRUSHLESS_MANIPULATOR_CFG.replace(prim_path="/World/envs/env_.*/Robot")
+
     thrust_to_weight = 3.5
+    mass = 0.041 # 39 grams
+    Ixx = 1.5417e-5
+    Iyy = 1.5904e-5
+    Izz = 2.869e-5
+    sim_rate_hz = 1000
+    decimation = 10 # 10x decimation from sim physics rate
+    pd_loop_rate_hz = 500
+    pd_loop_decimation = sim_rate_hz // pd_loop_rate_hz # decimation from sim physics rate
+
+    sim: SimulationCfg = SimulationCfg(
+        dt=1 / sim_rate_hz,
+        render_interval=decimation,
+        disable_contact_processing=True,
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            friction_combine_mode="multiply",
+            restitution_combine_mode="multiply",
+            static_friction=1.0,
+            dynamic_friction=1.0,
+            restitution=0.0,
+        ),
+    )
+    
+    # Reward Terms
+    previous_thrust_reward_scale = -0.01
+    previous_attitude_reward_scale = -0.01
+
     # Motor dynamics
     arm_length = 0.05
-    k_eta = 4.81e-8 #unchanged
+    k_eta = 0.31615 # Measured from thrust stand data
     k_m = 7.8e-10 #unchanged
-    tau_m = 0.03 #unchanged
+    k_torque = 2.567e-3 # Computed from sysID
+    tau_m = 0.045 # slower motor dynamics
     motor_speed_min = 0.0
-    motor_speed_max = 2500.0
+    motor_speed_max = 1.0
+    init_motor_speed = 0.1 # should be 0.1 if using SRT control mode
 
     kp_att = 3264.54 # 544
     kd_att = 361.58 # 46.64
 
     # CTBR Parameters
     kp_omega = 5.27 # measured on static test stand
-    kd_omega = 0.0
+    kd_omega = 1.0
     body_rate_scale_xy = 10.0
     body_rate_scale_z = 2.5
 
-    control_mode = "CTBR" # "CTBM" or "CTATT" or "CTBR"
+    control_mode = "SRT" # "CTBM" or "CTATT" or "CTBR" or "SRT"
+
+    task_body = "endeffector"
+    goal_body = "endeffector"
+    reward_task_body = "endeffector"
+    reward_goal_body = "endeffector"
+    visualization_body= "endeffector"
+
+    dr_dict = {
+        'thrust_to_weight':  0.0,
+        'mass': 0.0,
+        'inertia': 0.0,
+        'arm_length': 0.0,
+        'k_eta': 0.0,
+        'k_m': 0.0,
+        'tau_m': 0.0,
+        'kp_att': 0.0,
+        'kd_att': 0.0,
+    }
+
     has_end_effector = True
 
 
@@ -454,6 +508,7 @@ class QuadrotorEnv(DirectRLEnv):
         self.lissajous_offsets_rand_ranges = torch.tensor(self.cfg.lissajous_offsets_rand_ranges, device=self.device).float()
 
         self._time = torch.zeros(self.num_envs, 1, device=self.device)
+        self.pos_radius_start = self.cfg.pos_radius
 
         
 
@@ -501,6 +556,8 @@ class QuadrotorEnv(DirectRLEnv):
                 "lin_vel",
                 "ang_vel",
                 "pos_distance",
+                "pos_corse",
+                "pos_fine",
                 "pos_error",
                 "yaw_error",
                 "previous_thrust",
@@ -534,6 +591,7 @@ class QuadrotorEnv(DirectRLEnv):
             # print("Body ori in EE frame: ", self.body_ori_ee_frame)
             # import code; code.interact(local=locals())
             self.body_pos_ee_frame = self.body_pos_ee_frame.tile((self.num_envs, 1))
+            self.com_pos_e = self.body_pos_ee_frame.clone().to(self.device)  # Center of mass in end effector frame
 
         ## INTRODUCED FIXES TO GET THE SRT HOVER EXAMPLE TO WORK
         else:
@@ -769,14 +827,19 @@ class QuadrotorEnv(DirectRLEnv):
 
 
         # Old Motor Dynamics
-        if self.cfg.control_mode != "SRT":       
-            motor_accel = torch.bmm((1.0/self._tau_m).reshape(self.num_envs, 1, 1), (self._motor_speeds_des - self._motor_speeds).unsqueeze(1)).squeeze(1) # (n_envs, 4)
-            self._motor_speeds += motor_accel * self.physics_dt
-            self._motor_speeds = self._motor_speeds.clamp(self.cfg.motor_speed_min, self.cfg.motor_speed_max) # Motor saturation
-        else:
-            # New Motor Dynamics --> Assumes motor speeds are between 0 and 1 (used for SRT control mode)
-            alpha = torch.exp(-self.physics_dt / self._tau_m).unsqueeze(-1) # Exponential decay factor
-            self._motor_speeds = alpha * self._motor_speeds + (1 - alpha) * self._motor_speeds_des # Update motor speeds with exponential decay
+        # if self.cfg.control_mode != "SRT":       
+        #     motor_accel = torch.bmm((1.0/self._tau_m).reshape(self.num_envs, 1, 1), (self._motor_speeds_des - self._motor_speeds).unsqueeze(1)).squeeze(1) # (n_envs, 4)
+        #     self._motor_speeds += motor_accel * self.physics_dt
+        #     self._motor_speeds = self._motor_speeds.clamp(self.cfg.motor_speed_min, self.cfg.motor_speed_max) # Motor saturation
+        # else:
+        #     # New Motor Dynamics --> Assumes motor speeds are between 0 and 1 (used for SRT control mode)
+        #     alpha = torch.exp(-self.physics_dt / self._tau_m).unsqueeze(-1) # Exponential decay factor
+        #     self._motor_speeds = alpha * self._motor_speeds + (1 - alpha) * self._motor_speeds_des # Update motor speeds with exponential decay
+        
+        alpha = torch.exp(-self.physics_dt / self._tau_m).unsqueeze(-1) # Exponential decay factor
+        self._motor_speeds = alpha * self._motor_speeds + (1 - alpha) * self._motor_speeds_des # Update motor speeds with exponential decay
+
+        self._motor_speeds = self._motor_speeds.clamp(self.cfg.motor_speed_min, self.cfg.motor_speed_max) # Motor saturation
 
         motor_forces = self.cfg.k_eta * self._motor_speeds ** 2
    
@@ -800,7 +863,7 @@ class QuadrotorEnv(DirectRLEnv):
         if self.cfg.pos_radius_curriculum > 0:
             # half the pos radius every pos_radius_curriculum timesteps
             # self.cfg.pos_radius = 0.8 * (0.25 ** (total_timesteps // self.cfg.pos_radius_curriculum))
-            self.cfg.pos_radius = 0.8 * (0.5 ** (total_timesteps // self.cfg.pos_radius_curriculum))
+            self.cfg.pos_radius = self.pos_radius_start * (0.5 ** (total_timesteps // self.cfg.pos_radius_curriculum))
 
     def update_goal_state(self):
         # env_ids = (self.episode_length_buf % int(self.cfg.traj_update_dt*self.cfg.policy_rate_hz)== 0).nonzero(as_tuple=False)
@@ -947,6 +1010,12 @@ class QuadrotorEnv(DirectRLEnv):
             grav_vector_b = quat_rotate_inverse(base_ori_w, self._grav_vector_unit) # projected gravity vector in the cfg frame
         else:
             grav_vector_b = torch.zeros(self.num_envs, 0, device=self.device)
+
+
+        if self.cfg.action_history_length > 1:
+            action_history = self._action_history[:,1:].view(self.num_envs, -1) # flatten the action history. Most recent action is not included since it is already part of the observation
+        else:
+            action_history = torch.zeros(self.num_envs, 0, device=self.device)
         
         # Compute the linear and angular velocities of the end-effector in body frame
         # if self.cfg.trajectory_horizon > 0:
@@ -1060,6 +1129,7 @@ class QuadrotorEnv(DirectRLEnv):
                     lin_vel_b,                                  # (num_envs, 3)
                     ang_vel_b,                                  # (num_envs, 3)
                     previous_actions,                           # (num_envs, 4)
+                    action_history,                             # (num_envs, 4 * action_history_length) if action_history_length > 1, else 0
                     future_pos_error_b.flatten(-2, -1),         # (num_envs, horizon * 3)
                     future_ori_error_b.flatten(-2, -1)          # (num_envs, horizon * 4) if use_yaw_representation_for_trajectory, else (num_envs, horizon, 1)
                 ],
@@ -1100,6 +1170,9 @@ class QuadrotorEnv(DirectRLEnv):
                 future_com_ori_w = torch.zeros(self.num_envs, self.cfg.trajectory_horizon, 4, device=self.device)
 
             goal_pos_w, goal_ori_w = self.get_goal_state_from_task("COM")
+
+            # Convert angular velocity to deg/s to match gyro sensor output (it gets converted to body-frame in the controller)
+            quad_ang_vel_w = quad_ang_vel_w * (180.0 / math.pi)
 
             gc_obs = torch.cat(
                 [
@@ -1165,8 +1238,12 @@ class QuadrotorEnv(DirectRLEnv):
         # pos_distance = 1.0 - torch.tanh(pos_error / self.cfg.pos_radius)
         if self.cfg.square_pos_error:
             pos_distance = torch.exp(- (pos_error **2) / self.cfg.pos_radius)
+            pos_corse_distance = torch.exp(- (pos_error**2) / self.cfg.pos_corse_radius)
+            pos_fine_distance = torch.exp(- (pos_error ** 0.4) / self.cfg.pos_fine_radius)
         else:
             pos_distance = torch.exp(- (pos_error) / self.cfg.pos_radius)
+            pos_corse_distance = torch.exp(- (pos_error) / self.cfg.pos_corse_radius)
+            pos_fine_distance = torch.exp(- pos_error / self.cfg.pos_fine_radius)
 
         ori_error = isaac_math_utils.quat_error_magnitude(goal_ori_w, base_ori_w)
         
@@ -1214,7 +1291,8 @@ class QuadrotorEnv(DirectRLEnv):
         # action_error = torch.sum(torch.square(self._actions - self._previous_action), dim=1)
         action_thrust_error = torch.square(self._actions[:, 0] - self._previous_action[:, 0])
         action_att_error = torch.sum(torch.square(self._actions[:, 1:] - self._previous_action[:, 1:]), dim=1)
-        action_norm_error = torch.sum(torch.square(self._actions - self._nominal_action), dim=1)
+        # action_norm_error = torch.sum(torch.square(self._actions - self._nominal_action), dim=1)
+        action_norm_error = torch.linalg.norm(self._actions[:,1:], dim=1)
 
         self._previous_action = self._actions.clone()
         crash_penalty_time = self.cfg.crash_penalty * (self.max_episode_length - self.episode_length_buf)
@@ -1239,6 +1317,8 @@ class QuadrotorEnv(DirectRLEnv):
                 "lin_vel": lin_vel_error * self.cfg.lin_vel_reward_scale * time_scale,
                 "ang_vel": ang_vel_error * self.cfg.ang_vel_reward_scale * time_scale,
                 "pos_distance": pos_distance * self.cfg.pos_distance_reward_scale * time_scale,
+                "pos_corse": pos_corse_distance * self.cfg.pos_corse_reward_scale * time_scale,
+                "pos_fine": pos_fine_distance * self.cfg.pos_fine_reward_scale * time_scale,
                 "pos_error": pos_error * self.cfg.pos_error_reward_scale * time_scale,
                 "yaw_error": ori_error * self.cfg.yaw_error_reward_scale * time_scale,
                 "previous_thrust": action_thrust_error * self.cfg.previous_thrust_reward_scale * time_scale,
@@ -1382,6 +1462,18 @@ class QuadrotorEnv(DirectRLEnv):
             default_root_state = self._robot.data.default_root_state[env_ids]
             default_root_state[:, :3] += self._terrain.env_origins[env_ids]
             default_root_state[:, 2] = 3.0
+
+            # Initialize with -360 deg/s roll rate to test stabilization
+            init_vel = default_root_state[:, 7:10]
+            init_ang_vel_w = torch.zeros_like(default_root_state[:, 10:13], device=self.device)
+            init_ang_vel_w[:, 0] = -2.0 * math.pi  # -360 deg/s roll rate
+            init_ang_vel_b = isaac_math_utils.quat_rotate_inverse(default_root_state[:, 3:7], init_ang_vel_w)
+            default_root_state[:, 7:10] = init_vel
+            default_root_state[:, 10:13] = init_ang_vel_b
+            print("[Isaac Env: Reset] Initial angular velocity (world frame): ", init_ang_vel_w[0])
+            print("[Isaac Env: Reset] Initial angular velocity (body frame): ", init_ang_vel_b[0])
+            # Initialize the robot on the trajectory with the correct velocity
+            # default_root_state[:, :3] = self._desired_pos_w[env_ids]
             # default_root_state[:, 3:7] = self._desired_ori_w[env_ids]
         elif self.cfg.init_cfg == "rotorpy":
             default_root_state = self._robot.data.default_root_state[env_ids]
@@ -1488,6 +1580,9 @@ class QuadrotorEnv(DirectRLEnv):
         if self.cfg.dr_dict.get("k_m", 0.0) > 0:
             self._k_m[env_ids] = torch.zeros_like(self._k_m[env_ids], device=self.device).uniform_(-1e-10, 1e-10) + self.cfg.k_m*torch.ones(self._k_m[env_ids].shape, device=self.device)
             reinit_motor_dynamics = True
+
+        if self.cfg.dr_dict.get("k_torque", 0.0) < 0:
+            self._k_torque[env_ids] = torch.zeros_like(self._k_torque[env_ids], device=self.device).uniform_(1-self.cfg.dr_dict["k_torque"], 1+self.cfg.dr_dict["k_torque"]) * self.cfg.k_torque
         
         if self.cfg.dr_dict.get("arm_length", 0.0) > 0:
             self._arm_length[env_ids] = torch.zeros_like(self._arm_length[env_ids], device=self.device).uniform_(-0.01, 0.01) + self.cfg.arm_length*torch.ones(self._arm_length[env_ids].shape, device=self.device)
@@ -1515,6 +1610,7 @@ class QuadrotorEnv(DirectRLEnv):
             print("[Isaac Env: Domain Randomization] kp_att: ", self._kp_att[env_ids][0])
             print("[Isaac Env: Domain Randomization] kd_att: ", self._kd_att[env_ids][0])
             print("[Isaac Env: Domain Randomization] motor speeds: ", self._motor_speeds[env_ids][0])
+            print("[Isaac Env: Domain Randomization] max thrust: ", self.max_thrust[env_ids][0])
 
     
     def reinitialize_motor_dynamics(self, env_ids: torch.Tensor | None = None):
@@ -1531,7 +1627,11 @@ class QuadrotorEnv(DirectRLEnv):
             ],
             dim=1, 
         )
-        self.k[env_ids] = self._k_m[env_ids] / self._k_eta[env_ids]
+
+        if self.cfg.k_torque > 0.0:
+            self.k[env_ids] = self.cfg.k_torque * torch.ones(num_envs, device=self.device)
+        else:
+            self.k[env_ids] = self._k_m / self._k_eta
         
         self.f_to_TM[env_ids] = torch.cat(
             [
@@ -1569,6 +1669,18 @@ class QuadrotorEnv(DirectRLEnv):
         else:
             raise NotImplementedError(f"Body name {body_name} is not implemented.")
         return pos, ori, vel, ang_vel
+
+    def get_ang_vel_body(self, body_name: str) -> torch.Tensor:
+        if body_name == "body":
+            ang_vel_b = self._robot.data.root_ang_vel_b
+        elif body_name == "root":
+            ang_vel_b = self._robot.data.root_ang_vel_b
+        elif body_name == "endeffector":
+            ang_vel_b = quat_rotate_inverse(self._robot.data.body_quat_w[:, self._ee_id].squeeze(1), self._robot.data.body_ang_vel_w[:, self._ee_id].squeeze(1))
+        else:
+            raise NotImplementedError(f"Body name {body_name} is not implemented.")
+        
+        return ang_vel_b
     
     def get_frame_state_from_task(self, task_body:str) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         if task_body == "root":

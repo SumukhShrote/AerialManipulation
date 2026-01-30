@@ -370,4 +370,20 @@ gc_params_dict = {
             "kd_att_gain_z": 5.044,
         }
     },
+
+    "Isaac-Crazyflie-CTBR-Hover-v0-sim2real": {
+        "log_dir": "./baseline_cf_ctbr_sim2real/",
+        "controller_params": {
+            "feed_forward": False,
+            "control_mode": "CTBM",
+            "kp_pos_gain_xy": 4.495,
+            "kp_pos_gain_z": 16.200,
+            "kd_pos_gain_xy": 3.143,
+            "kd_pos_gain_z": 8.931,
+            "kp_att_gain_xy": 95.868,
+            "kp_att_gain_z": 18.613,
+            "kd_att_gain_xy": 14.726,
+            "kd_att_gain_z": 3.776,
+        }
+    },
 }

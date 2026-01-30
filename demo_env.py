@@ -64,9 +64,11 @@ def main():
     # env_cfg.viewer.lookat = (0.0, 1.5, 0.5)
     # env_cfg.viewer.origin_type = "env"
     # env_cfg.viewer.env_index = 0
-    
-    env_cfg.viewer.eye = (-0.25, 0.25, 0.25)
-    env_cfg.viewer.resolution = (1280, 720)
+
+
+    # Look at env 0. 
+    env_cfg.viewer.eye = (-0.5, 0.5, 0.5)
+    env_cfg.viewer.resolution = (1920, 1080)
     env_cfg.viewer.lookat = (0.0, 0.0, 0.0)
     env_cfg.viewer.origin_type = "asset_root"
     env_cfg.viewer.env_index = 0
@@ -81,95 +83,125 @@ def main():
     # print("Dropping into Demo_Env")
     # import code; code.interact(local=locals())
 
-    print(env_cfg.robot.spawn)
 
-    env_cfg.seed = 1
-    env_cfg.goal_cfg = "rand" # "rand" or "fixed"
-    # env_cfg.goal_pos = [-0.2007, -0.2007, 0.5]
-    # env_cfg.goal_pos = [-0.15, -0.15, 0.5]
-    env_cfg.goal_pos = [0.0, -1.0, 3.0]
+    # Set up Roll BR Test
+    env_cfg.policy_rate_hz = 1000
+    env_cfg.sim_rate_hz = 1000
+    env_cfg.decimation = 1
+    env_cfg.sim.render_interval = 1
+    env_cfg.control_mode="CTBR"
+    env_cfg.k_eta=0.2457
+    env_cfg.tau_m=0.044
+    env_cfg.lissajous_offsets_rand_ranges=[2.0, 2.0, 2.0, 2.0]
+    env_cfg.init_lin_vel_ranges=[0.5, 0.5, 0.5]
+    env_cfg.init_ang_vel_ranges=[0.5, 0.5, 0.5]
+    env_cfg.init_pos_ranges=[2.0, 2.0, 2.0]
+    env_cfg.k_torque=2.852e-3
+    env_cfg.Ixx=1.8415e-5
+    env_cfg.Iyy=2.1895e-5
+    env_cfg.Izz=3.6925e-5
+    env_cfg.use_previous_actions=True
+    env_cfg.action_norm_reward_scale=-1.0
+    # env_cfg.body_rate_scale_xy=1.7453
+    # env_cfg.body_rate_scale_z=0.4363
+    env_cfg.body_rate_scale_xy=2*3.14159
+    env_cfg.body_rate_scale_z=0.7854
+    env_cfg.kp_omega=75.0
+    env_cfg.kd_omega=100.0
+    env_cfg.init_cfg="fixed"
+
+
+
+
+    # print(env_cfg.robot.spawn)
+
+    # env_cfg.seed = 1
+    # # env_cfg.goal_cfg = "rand" # "rand" or "fixed"
+    # # env_cfg.goal_pos = [-0.2007, -0.2007, 0.5]
+    # # env_cfg.goal_pos = [-0.15, -0.15, 0.5]
+    # env_cfg.goal_pos = [0.0, -1.0, 3.0]
     
-    env_cfg.goal_ori = [1.0, 0.0, 0.0, 0.0] # 0 deg z axis
-    # env_cfg.goal_ori = [0.7071068, 0.0, 0.0, 0.7071068] # pi/2 deg z axis
-    # env_cfg.goal_ori = [0.0871557, 0.0, 0.0, 0.9961947] # 170 deg z axis
+    # env_cfg.goal_ori = [1.0, 0.0, 0.0, 0.0] # 0 deg z axis
+    # # env_cfg.goal_ori = [0.7071068, 0.0, 0.0, 0.7071068] # pi/2 deg z axis
+    # # env_cfg.goal_ori = [0.0871557, 0.0, 0.0, 0.9961947] # 170 deg z axis
 
     
     
-    # env_cfg.sim_rate_hz = 100
-    # env_cfg.policy_rate_hz = 50
-    # env_cfg.sim.dt = 1/env_cfg.sim_rate_hz
-    # env_cfg.decimation = env_cfg.sim_rate_hz // env_cfg.policy_rate_hz
-    # env_cfg.sim.render_interval = env_cfg.decimation
-    env_cfg.eval_mode = True
-    # env_cfg.init_cfg = "fixed"
+    # # env_cfg.sim_rate_hz = 100
+    # # env_cfg.policy_rate_hz = 50
+    # # env_cfg.sim.dt = 1/env_cfg.sim_rate_hz
+    # # env_cfg.decimation = env_cfg.sim_rate_hz // env_cfg.policy_rate_hz
+    # # env_cfg.sim.render_interval = env_cfg.decimation
+    # env_cfg.eval_mode = True
+    # # env_cfg.init_cfg = "fixed"
 
-    # env_cfg.task_body = "body"
-    # env_cfg.reward_task_body = "body"
-    env_cfg.task_body = "endeffector"
-    env_cfg.reward_task_body = "endeffector"
+    # # env_cfg.task_body = "body"
+    # # env_cfg.reward_task_body = "body"
+    # env_cfg.task_body = "endeffector"
+    # env_cfg.reward_task_body = "endeffector"
 
-    # env_cfg.task_body = "root"
-    # env_cfg.goal_body = "COM"
+    # # env_cfg.task_body = "root"
+    # # env_cfg.goal_body = "COM"
 
-    env_cfg.gc_mode = True
-    # env_cfg.control_mode = "CTATT"
+    # env_cfg.gc_mode = True
+    # # env_cfg.control_mode = "CTATT"
 
     
-    if "Traj" in args_cli.task:
-        # env_cfg.trajectory_params["x_amp"] = 1.01
-        # env_cfg.trajectory_params["y_amp"] = 0.0
-        # env_cfg.trajectory_params["z_amp"] = 0.0
-        # env_cfg.trajectory_params["z_offset"] = 0.5
-        # env_cfg.trajectory_params["yaw_amp"] = 1.0
-        # env_cfg.trajectory_params["yaw_freq"] = 1.0
-        # env_cfg.traj_update_dt = 0.02
+    # if "Traj" in args_cli.task:
+    #     # env_cfg.trajectory_params["x_amp"] = 1.01
+    #     # env_cfg.trajectory_params["y_amp"] = 0.0
+    #     # env_cfg.trajectory_params["z_amp"] = 0.0
+    #     # env_cfg.trajectory_params["z_offset"] = 0.5
+    #     # env_cfg.trajectory_params["yaw_amp"] = 1.0
+    #     # env_cfg.trajectory_params["yaw_freq"] = 1.0
+    #     # env_cfg.traj_update_dt = 0.02
         
 
-        env_cfg.viewer.eye = (0.75, 0.75, 0.75)
-        # env_cfg.viewer.lookat = (0.0, 0.0, 0.5)
-        # env_cfg.viewer.origin_type = "asset_root"
-        # env_cfg.viewer.env_index = 0
-        # env_cfg.viewer.asset_name = "robot"
+    #     env_cfg.viewer.eye = (0.75, 0.75, 0.75)
+    #     # env_cfg.viewer.lookat = (0.0, 0.0, 0.5)
+    #     # env_cfg.viewer.origin_type = "asset_root"
+    #     # env_cfg.viewer.env_index = 0
+    #     # env_cfg.viewer.asset_name = "robot"
 
 
-        env_cfg.lissajous_amplitudes=[1.0, 1.0, 0.0, 0.0]
-        # env_cfg.lissajous_frequencies=[1.570796, 1.570796, 0.0, 0.0]
-        env_cfg.lissajous_frequencies=[3.141593, 3.141593, 0.0, 0.0]
-        env_cfg.lissajous_phases=[0.0, 1.570796, 0.0, 0.0]
-        # env_cfg.lissajous_offsets_rand_ranges=[1.0, 1.0, 1.0, 1.57]
-        env_cfg.init_pos_ranges=[0.2, 0.2, 0.2]
-        env_cfg.polynomial_yaw_coefficients=[-3.141593, -3.141593]
-        env_cfg.trajectory_type="combined"
-        # env_cfg.init_pos_ranges=[0.0, 0.0, 0.0]
-        env_cfg.init_cfg = "rand"       
-        # env_cfg.init_cfg = "fixed"       
+    #     env_cfg.lissajous_amplitudes=[1.0, 1.0, 0.0, 0.0]
+    #     # env_cfg.lissajous_frequencies=[1.570796, 1.570796, 0.0, 0.0]
+    #     env_cfg.lissajous_frequencies=[3.141593, 3.141593, 0.0, 0.0]
+    #     env_cfg.lissajous_phases=[0.0, 1.570796, 0.0, 0.0]
+    #     # env_cfg.lissajous_offsets_rand_ranges=[1.0, 1.0, 1.0, 1.57]
+    #     env_cfg.init_pos_ranges=[0.2, 0.2, 0.2]
+    #     env_cfg.polynomial_yaw_coefficients=[-3.141593, -3.141593]
+    #     env_cfg.trajectory_type="combined"
+    #     # env_cfg.init_pos_ranges=[0.0, 0.0, 0.0]
+    #     env_cfg.init_cfg = "rand"       
+    #     # env_cfg.init_cfg = "fixed"       
 
-        env_cfg.viz_mode = "robot"
+    #     env_cfg.viz_mode = "robot"
 
-        # print("Lissajous Params: ", env_cfg.trajectory_params)
+    #     # print("Lissajous Params: ", env_cfg.trajectory_params)
 
 
-    # Turn gravity off
-    env_cfg.robot.spawn.rigid_props.disable_gravity = False
+    # # Turn gravity off
+    # env_cfg.robot.spawn.rigid_props.disable_gravity = False
 
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array")
 
     # Get mass from env
-    vehicle_mass = env.vehicle_mass # this is pulled from the body "vehicle" in the USD file
-    # vehicle_mass = torch.tensor([0.706028], device=env.device)
-    arm_mass = env.arm_mass 
-    # arm_mass = env.arm_mass - vehicle_mass
-    inertia =  env.quad_inertia
-    arm_offset = env.arm_offset
-    pos_offset = env.position_offset
-    ori_offset = env.orientation_offset
-    print("Vehicle Mass: ", vehicle_mass)
-    print("Arm Mass: ", arm_mass)
-    print("Mass: ", vehicle_mass + arm_mass)
-    print("Inertia: ", inertia)
-    print("Arm Offset: ", arm_offset)
-    print("Pos Offset: ", pos_offset)
-    print("Ori Offset: ", ori_offset)
+    # vehicle_mass = env.vehicle_mass # this is pulled from the body "vehicle" in the USD file
+    # # vehicle_mass = torch.tensor([0.706028], device=env.device)
+    # arm_mass = env.arm_mass 
+    # # arm_mass = env.arm_mass - vehicle_mass
+    # inertia =  env.quad_inertia
+    # arm_offset = env.arm_offset
+    # pos_offset = env.position_offset
+    # ori_offset = env.orientation_offset
+    # print("Vehicle Mass: ", vehicle_mass)
+    # print("Arm Mass: ", arm_mass)
+    # print("Mass: ", vehicle_mass + arm_mass)
+    # print("Inertia: ", inertia)
+    # print("Arm Offset: ", arm_offset)
+    # print("Pos Offset: ", pos_offset)
+    # print("Ori Offset: ", ori_offset)
 
     # input("Press Enter to continue...")
 
@@ -184,10 +216,10 @@ def main():
     # gc = DecoupledController(args_cli.num_envs, 0, vehicle_mass, arm_mass, inertia, arm_offset, ori_offset, print_debug=True, com_pos_w=None, device=env.device,
     #                          use_full_obs=False)
     
-    gc = DecoupledController(args_cli.num_envs, 0, vehicle_mass, arm_mass, inertia, arm_offset, ori_offset, print_debug=False, com_pos_w=None, device=env.device,
-                             kp_pos_gain_xy=43.507, kp_pos_gain_z=24.167, kd_pos_gain_xy=9.129, kd_pos_gain_z=6.081,
-                             kp_att_gain_xy=998.777, kp_att_gain_z=18.230, kd_att_gain_xy=47.821, kd_att_gain_z=8.818,
-                             feed_forward=True)
+    # gc = DecoupledController(args_cli.num_envs, 0, vehicle_mass, arm_mass, inertia, arm_offset, ori_offset, print_debug=False, com_pos_w=None, device=env.device,
+    #                          kp_pos_gain_xy=43.507, kp_pos_gain_z=24.167, kd_pos_gain_xy=9.129, kd_pos_gain_z=6.081,
+    #                          kp_att_gain_xy=998.777, kp_att_gain_z=18.230, kd_att_gain_xy=47.821, kd_att_gain_z=8.818,
+    #                          feed_forward=True)
     # gc = DecoupledController(args_cli.num_envs, 0, vehicle_mass, arm_mass, inertia, arm_offset, ori_offset, print_debug=False, com_pos_w=None, device=env.device,
     #                         skip_precompute=True)
     
@@ -204,8 +236,8 @@ def main():
         "video_folder": "videos",
         "step_trigger": lambda step: step == 0,
         # "episode_trigger": lambda episode: episode == 0,
-        "video_length": 501,
-        "name_prefix": "flatness_tuning"
+        "video_length": 600,
+        "name_prefix": "roll_rate_tuning"
     }
     env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
@@ -229,34 +261,40 @@ def main():
 
     done = False
     done_count = 0
+    step = 0
     ee_omega_list = []
     quad_omega_list = []
     ee_pos_list = []
+
+    body_rates_cmd = []
+    body_rates_measured = []
     
-    import code; code.interact(local=locals())
+    # import code; code.interact(local=locals())
     
     while simulation_app.is_running():
-        while done_count < 1:
+        while done_count < 1 and step < 600:
             obs_tensor = obs_dict["policy"]
             # action = env.action_space.sample()
             # action = torch.zeros_like(torch.from_numpy(env.action_space.sample()))
             # action[0]= -1.0/3.0 # nominal hover action with gravity enabled 
-            action = torch.tensor([-1.0/3.0, 0.0, 0.0, 0.0, 0.0, 0.0]) # nominal hover action with gravity enabled.
+            # action = torch.tensor([-1.0/3.0, 0.0, 0.0, 0.0, 0.0, 0.0]) # nominal hover action with gravity enabled.
             # action = torch.tensor([-1.0, 0.0, 0.0, 0.0, 0.0, 1.0]) # nominal hover action with gravity disabled.
 
+            
+
             # action = torch.tensor([-1.0/1.9, 0.0, 0.0, 0.0])
-            action = torch.tile(action, (args_cli.num_envs, 1)).to(obs_tensor.device)
+            # action = torch.tile(action, (args_cli.num_envs, 1)).to(obs_tensor.device)
 
 
             # full_state = obs_dict["full_state"]
             # action_gc = gc.get_action(full_state)
-            obs = obs_dict["gc"]
-            action_gc = gc.get_action(obs)
+            # obs = obs_dict["gc"]
+            # action_gc = gc.get_action(obs)
             # action_gc[:,0] = -1.0 # no thrust
-            print("Action GC: ", action_gc)
+            # print("Action GC: ", action_gc)
 
-            print("Pos: ", obs[:,:3])
-            print("Goal pos: ", obs[:,13:16])
+            # print("Pos: ", obs[:,:3])
+            # print("Goal pos: ", obs[:,13:16])
 
             # init_states[:,:3,0] = obs[:,:3].detach().cpu().numpy()
             # init_states[:,3:12,0] = isaac_math_utils.matrix_from_quat(obs[:,3:7]).detach().cpu().numpy().reshape(-1, 9)
@@ -290,13 +328,26 @@ def main():
             # ee_pos_list.append(ee_pos.detach().cpu().numpy())
 
 
-            action = action_gc.to(obs_tensor.device)
+            # action = action_gc.to(obs_tensor.device)
+
+            action = torch.zeros((args_cli.num_envs, 4), device=obs_tensor.device)
+            if step < 50:
+                action[:, 1] = -1.0
+            else:
+                action[:, 1] = 1.0
+
+            body_rates_cmd.append(action[:, 1].detach().cpu().numpy() * env_cfg.body_rate_scale_xy)
+
+            body_rate = env.unwrapped.get_ang_vel_body("body")
+            body_rates_measured.append(body_rate[:, 0].detach().cpu().numpy())
 
             obs_dict, reward, terminated, truncated, info = env.step(action)
             done_count += terminated.sum().item() + truncated.sum().item()
-            print("Done count: ", done_count)
-            print("Reward: ", reward)
-            print()
+            step += 1
+            print("Step: ", step)
+            # print("Done count: ", done_count)
+            # print("Reward: ", reward)
+            # print()
             # input()
         print("Final info: ", info)
         # import code; code.interact(local=locals())
@@ -312,19 +363,22 @@ def main():
         # np.save("ee_pos_mass_com.npy", ee_pos)
 
 
-        # import matplotlib.pyplot as plt
-        # import numpy as np
+        import matplotlib.pyplot as plt
+        import numpy as np
 
         # ee_omega = np.array(ee_omega_list)
         # quad_omega = np.array(quad_omega_list)
         # print("EE Omega: ", ee_omega.shape)
         # print("Quad Omega: ", quad_omega.shape)
 
-        # plt.figure()
-        # plt.plot(np.linalg.norm(ee_omega, axis=1), label="EE Omega")
-        # plt.plot(np.linalg.norm(quad_omega, axis=1), label="Quad Omega")
-        # plt.legend()
-        # plt.show()
+        plt.figure()
+        plt.plot(body_rates_cmd[:350], label="Cmd")
+        plt.plot(body_rates_measured[:350], label="Measured")
+        plt.title("Roll Body Rate Command vs Measured")
+        plt.xlabel("Time Step")
+        plt.ylabel("Body Rate (rad/s)")
+        plt.legend()
+        plt.savefig("roll_body_rate_cmd_vs_measured.png")
 
 
         env.close()

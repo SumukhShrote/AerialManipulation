@@ -71,10 +71,15 @@ def eval_trial(trial):
     pos_kp_gain_z = trial.suggest_float("pos_kp_gain_z", 0.0, 50.0)
     pos_kd_gain_xy = trial.suggest_float("pos_kd_gain_xy", 0.0, 20.0)
     pos_kd_gain_z = trial.suggest_float("pos_kd_gain_z", 0.0, 20.0)
-    ori_kp_gain_xy = trial.suggest_float("ori_kp_gain_xy", 0.0, 1000.0)
-    ori_kp_gain_z = trial.suggest_float("ori_kp_gain_z", 0.0, 20.0)
+    # ori_kp_gain_xy = trial.suggest_float("ori_kp_gain_xy", 0.0, 0.1)
+    # ori_kp_gain_z = trial.suggest_float("ori_kp_gain_z", 0.0, 0.1)
+    # ori_kd_gain_xy = trial.suggest_float("ori_kd_gain_xy", 0.0, 0.01)
+    # ori_kd_gain_z = trial.suggest_float("ori_kd_gain_z", 0.0, 0.01)
+    ori_kp_gain_xy = trial.suggest_float("ori_kp_gain_xy", 0.0, 2000.0)
+    ori_kp_gain_z = trial.suggest_float("ori_kp_gain_z", 0.0, 500.0)
     ori_kd_gain_xy = trial.suggest_float("ori_kd_gain_xy", 0.0, 200.0)
-    ori_kd_gain_z = trial.suggest_float("ori_kd_gain_z", 0.0, 10.0)
+    ori_kd_gain_z = trial.suggest_float("ori_kd_gain_z", 0.0, 50.0)
+
 
     if use_integral_terms:
         pos_ki_gain_xy = trial.suggest_float("pos_ki_gain_xy", 0.0, 20.0)
@@ -109,7 +114,7 @@ def eval_trial(trial):
                                 kp_att_gain_xy=ori_kp_gain_xy, kp_att_gain_z=ori_kp_gain_z, kd_att_gain_xy=ori_kd_gain_xy, kd_att_gain_z=ori_kd_gain_z,
                                 tuning_mode=False, feed_forward=use_feed_forward_terms, vehicle=vehicle, skip_precompute=skip_precompute)
 
-    while steps < 500:
+    while steps < 10*policy_rate:  # Run for 10 seconds at policy rate
         obs_tensor = obs_dict["policy"]
         # full_state = obs_dict["full_state"]
         # action_gc = gc.get_action(full_state)
@@ -153,11 +158,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg):
 
 
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
-    env_cfg.sim_rate_hz = 100
-    env_cfg.policy_rate_hz = 50
-    env_cfg.sim.dt = 1/env_cfg.sim_rate_hz
-    env_cfg.decimation = env_cfg.sim_rate_hz // env_cfg.policy_rate_hz
-    env_cfg.sim.render_interval = env_cfg.decimation
+    # env_cfg.sim_rate_hz = 100
+    # env_cfg.policy_rate_hz = 50
+    # env_cfg.sim.dt = 1/env_cfg.sim_rate_hz
+    # env_cfg.decimation = env_cfg.sim_rate_hz // env_cfg.policy_rate_hz
+    # env_cfg.sim.render_interval = env_cfg.decimation
     env_cfg.gc_mode = True
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
     if "Crazyflie" in args_cli.task:
@@ -169,20 +174,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg):
 
     # Reward shaping
     env_cfg.pos_radius = 0.1
-    # env_cfg.pos_distance_reward_scale = 0.0
+    env_cfg.pos_distance_reward_scale = 15.0
     # env_cfg.pos_error_reward_scale = -2.0
     # env_cfg.yaw_error = -2.0
     # env_cfg.yaw_smooth_transition_scale = 0.0
 
     print("Args Task: ", args_cli.task)
 
+    global policy_rate
+    policy_rate = env_cfg.policy_rate_hz
 
     global env
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array")
     env = env.unwrapped
 
     # study_name = "DR ALL ang_vel -0.05 Control Delay 40ms Fixed Position Radius 0.1: " + args_cli.task
-    study_name = "CTBR sim2real tau=0.017 Position Radius 0.1: " + args_cli.task
+    study_name = "moment scale 0.01 sysID 100Hz Original Scale CTBM Position Radius 0.1: " + args_cli.task
 
     if use_integral_terms:
         study_name += " Integral Terms"

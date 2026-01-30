@@ -57,6 +57,7 @@ import gymnasium as gym
 import envs
 from controllers.decoupled_controller import DecoupledController
 from controllers.gc_params import gc_params_dict
+import utils.export_utilities as export_utils
 
 
 from rsl_rl.runners import OnPolicyRunner
@@ -426,8 +427,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
         export_policy_as_jit(
             ppo_runner.alg.actor_critic, ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.pt"
         )
-        
-    
+
+        ee_offset = -envs.unwrapped.body_pos_ee_frame[args_cli.follow_robot].cpu().numpy() if "DOF" in args_cli.task else None
+        export_utils.export_model_to_c(ppo_runner.alg.actor_critic, export_model_dir, policy_rate=env_cfg.policy_rate_hz, use_previous_action=env_cfg.use_previous_actions, ee_offset=ee_offset)
+
     if args_cli.baseline:
         obs_dict, info = envs.reset()
         obs = obs_dict["policy"]

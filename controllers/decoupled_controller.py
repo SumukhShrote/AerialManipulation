@@ -101,6 +101,7 @@ class DecoupledController():
             #Crazyflie
             # self.thrust_to_weight = 1.8 # brushed crazyflie
             self.thrust_to_weight = 3.5 # brushelss crazyflie
+            self.max_thrust = 0.2457 * 4.0 # 0.2457 N of thrust is max thrust per motor
             self.moment_scale_xy = 0.01
             self.moment_scale_z = 0.01
 
@@ -136,6 +137,10 @@ class DecoupledController():
 
         self.pos_error_integral = torch.zeros(num_envs, 3, device=self.device)
         self.att_error_integral = torch.zeros(num_envs, 3, device=self.device)
+
+        # print("mass: ", self.mass)
+        # print("inertia: ", self.inertia_tensor)
+        # import code; code.interact(local=locals())
 
 
         # Logging buffers
@@ -294,10 +299,16 @@ class DecoupledController():
             inertia = self.inertia_tensor.to(self.device)
         att_pd = -self.kp_att * att_err - self.kd_att * omega_err  - self.ki_att * att_err_integral
         I_omega = torch.bmm(inertia.view(batch_size, 3, 3), quad_omega.unsqueeze(2)).squeeze(2).to(self.device)
-
+       
+        # M_des = att_pd + \
         M_des = torch.bmm(inertia.view(batch_size, 3, 3), att_pd.unsqueeze(2)).squeeze(2) + \
                 torch.cross(quad_omega, I_omega, dim=1) - \
                 torch.bmm(inertia.view(batch_size, 3, 3), feed_forward_angular_acceleration.unsqueeze(2)).squeeze(2)
+        # print("att_pd: ", att_pd[0])
+        # print("I_omega: ", I_omega[0])
+        # print("ff_angular_acceleration: ", feed_forward_angular_acceleration[0])
+        # print("M_des: ", M_des[0])
+        # import code; code.interact(local=locals())
         
         if self.control_mode == "CTBM":
             return collective_thrust, M_des
@@ -351,8 +362,12 @@ class DecoupledController():
             # print("Collective thrust shape:", ct_shape)
 
             mass_reshape = self.mass.reshape(ct_shape) if type(self.mass) == float else self.mass
+
+            # print("Moment Desired: ", M_des[0,:])
+
             # print("Mass reshape shape:", mass_reshape.shape)
-            u1 = rescale_command(collective_thrust.squeeze(), torch.zeros_like(mass_reshape), self.thrust_to_weight * 9.81*mass_reshape).view(batch_size, 1)
+            max_thrust_tensor = torch.tensor(self.max_thrust).tile(batch_size, 1).to(self.device) 
+            u1 = rescale_command(collective_thrust.squeeze(), torch.zeros_like(mass_reshape), max_thrust_tensor.reshape(ct_shape)).view(batch_size, 1)
             u2 = rescale_command(M_des[:, 0], -self.moment_scale_xy * ones, self.moment_scale_xy * ones).view(batch_size, 1)
             u3 = rescale_command(M_des[:, 1], -self.moment_scale_xy  * ones, self.moment_scale_xy * ones).view(batch_size, 1)
             u4 = rescale_command(M_des[:, 2], -self.moment_scale_z * ones, self.moment_scale_z * ones).view(batch_size, 1)
