@@ -46,6 +46,7 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import gymnasium as gym
+import envs
 import os
 import torch
 from datetime import datetime
@@ -56,13 +57,16 @@ import envs
 from rsl_rl.runners import OnPolicyRunner
 
 from omni.isaac.lab.envs import DirectRLEnvCfg, ManagerBasedRLEnvCfg
-from omni.isaac.lab.utils.dict import print_dict, class_to_dict
-from omni.isaac.lab.utils.io import dump_pickle, dump_yaml
+from omni.isaac.lab.utils.dict import print_dict
+from omni.isaac.lab.utils.io import dump_yaml
 
 import omni.isaac.lab_tasks  # noqa: F401
 from omni.isaac.lab_tasks.utils import get_checkpoint_path
 from omni.isaac.lab_tasks.utils.hydra import hydra_task_config
-from omni.isaac.lab_tasks.utils.wrappers.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
+from omni.isaac.lab_tasks.utils.wrappers.rsl_rl import (
+    RslRlOnPolicyRunnerCfg,
+    RslRlVecEnvWrapper,
+)
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -72,7 +76,7 @@ torch.backends.cudnn.benchmark = False
 
 def custom_yaml_dump(data, filename):
     if not os.path.exists(os.path.dirname(filename)):
-            os.makedirs(os.path.dirname(filename), exist_ok=True)
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
 
     # dumper = yaml.YAML(typ='safe')
     dumper = yaml.YAML()
@@ -80,30 +84,36 @@ def custom_yaml_dump(data, filename):
 
 
 @hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")
-def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
+def main(
+    env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg
+):
     """Train with RSL-RL agent."""
     # override configurations with non-hydra CLI arguments
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
-    env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+    env_cfg.scene.num_envs = (
+        args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+    )
     agent_cfg.max_iterations = (
-        args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg.max_iterations
+        args_cli.max_iterations
+        if args_cli.max_iterations is not None
+        else agent_cfg.max_iterations
     )
 
     # set the environment seed
     # note: certain randomizations occur in the environment initialization so we set the seed here
 
-
     # env_cfg.seed = agent_cfg.seed
     env_cfg.seed = args_cli.seed if args_cli.seed is not None else env_cfg.seed
     agent_cfg.seed = env_cfg.seed if args_cli.seed is not None else agent_cfg.seed
-    env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
+    env_cfg.sim.device = (
+        args_cli.device if args_cli.device is not None else env_cfg.sim.device
+    )
     agent_cfg.device = env_cfg.sim.device
 
     # print(args_cli.seed)
     # print(agent_cfg.seed)
     # print(env_cfg.seed)
     # import code; code.interact(local=locals())
-
 
     # specify directory for logging experiments
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
@@ -119,13 +129,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
     if env_cfg.use_yaw_representation:
         # env_cfg.num_observations += 4
         env_cfg.num_observations += 1
-    
+
     if env_cfg.use_full_ori_matrix:
         # env_cfg.num_observations += 6
         env_cfg.num_observations += 9
 
     # create isaac environment
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    env = gym.make(
+        args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None
+    )
     # wrap for video recording
     if args_cli.video:
         video_kwargs = {
@@ -141,13 +153,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
     env = RslRlVecEnvWrapper(env)
 
     # create runner from rsl-rl
-    runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
+    runner = OnPolicyRunner(
+        env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device
+    )
     # write git state to logs
     runner.add_git_repo_to_log(__file__)
     # save resume path before creating a new log_dir
     if agent_cfg.resume:
         # get path to previous checkpoint
-        resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+        resume_path = get_checkpoint_path(
+            log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint
+        )
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
         # load previously trained model
         runner.load(resume_path)
@@ -157,18 +173,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
     # dump_pickle(os.path.join(log_dir, "params", "env.pkl"), env_cfg)
     # dump_pickle(os.path.join(log_dir, "params", "agent.pkl"), agent_cfg)
-    
+
     # custom_yaml_dump(env_cfg.to_dict(), os.path.join(log_dir, "params", "env.yaml"))
     # custom_yaml_dump(agent_cfg.to_dict(), os.path.join(log_dir, "params", "agent.yaml"))
 
     # run training
-    runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
+    runner.learn(
+        num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True
+    )
 
     # close the simulator
     env.close()
 
     print("\n\nPlease run the following line to evaluate the trained model: ")
-    print(f"python eval_rslrl.py --video --task {args_cli.task} --num_envs 100 --experiment_name {agent_cfg.experiment_name} --load_run {agent_run_name}")
+    print(
+        f"python eval_rslrl.py --video --task {args_cli.task} --num_envs 100 --experiment_name {agent_cfg.experiment_name} --load_run {agent_run_name}"
+    )
     print("\n Hydra args: ")
     print(*[f"'{arg}'" for arg in hydra_args])
 
@@ -178,3 +198,4 @@ if __name__ == "__main__":
     main()
     # close sim app
     simulation_app.close()
+
