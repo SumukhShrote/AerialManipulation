@@ -1,6 +1,6 @@
 import argparse
 import sys 
-from omni.isaac.lab.app import AppLauncher
+from isaaclab.app import AppLauncher
 
 # local imports
 from utils import cli_args  # isort: skip
@@ -62,19 +62,19 @@ import utils.export_utilities as export_utils
 
 from rsl_rl.runners import OnPolicyRunner
 
-from omni.isaac.lab.utils.dict import print_dict
+from isaaclab.utils.dict import print_dict
 
-import omni.isaac.lab_tasks  # noqa: F401
-from omni.isaac.lab.envs import DirectRLEnvCfg, ManagerBasedRLEnvCfg
-from omni.isaac.lab_tasks.utils.hydra import hydra_task_config
-from omni.isaac.lab_tasks.utils import get_checkpoint_path, parse_env_cfg
-from omni.isaac.lab_tasks.utils.wrappers.rsl_rl import (
+import isaaclab_tasks  # noqa: F401
+from isaaclab.envs import DirectRLEnvCfg, ManagerBasedRLEnvCfg
+from isaaclab_tasks.utils.hydra import hydra_task_config
+from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
+from isaaclab_rl.rsl_rl import (
     RslRlOnPolicyRunnerCfg,
     RslRlVecEnvWrapper,
     export_policy_as_jit,
     export_policy_as_onnx,
 )
-from omni.isaac.lab.utils.io import load_yaml
+from isaaclab.utils.io import load_yaml
 
 import numpy as np
 import torch
@@ -423,13 +423,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
         # print("Total params: ", actor_params + critic_params)
         # input()
 
-        export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-        export_policy_as_jit(
-            ppo_runner.alg.actor_critic, ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.pt"
-        )
+        # export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+        # export_policy_as_jit(
+        #     ppo_runner.alg.actor_critic, ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.pt"
+        # )
 
+        export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+        
         ee_offset = -envs.unwrapped.body_pos_ee_frame[args_cli.follow_robot].cpu().numpy() if "DOF" in args_cli.task else None
-        export_utils.export_model_to_c(ppo_runner.alg.actor_critic, export_model_dir, policy_rate=env_cfg.policy_rate_hz, use_previous_action=env_cfg.use_previous_actions, ee_offset=ee_offset)
+        export_utils.export_model_to_c(ppo_runner.alg.policy.actor, export_model_dir, policy_rate=env_cfg.policy_rate_hz, use_previous_action=env_cfg.use_previous_actions, ee_offset=ee_offset)
 
     if args_cli.baseline:
         obs_dict, info = envs.reset()
@@ -440,8 +442,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
         # agent.reset_dr_terms(None, env.vehicle_mass, env.vehicle_inertia, env._thrust_to_weight)
     else:
         # obs, dict_obs = envs.reset()
-        obs, dict_obs = envs.get_observations()
-        obs_dict = dict_obs['observations']
+        obs_dict = envs.get_observations()
+        # obs_dict = dict_obs['observations']
 
     print("Starting obs: ", obs_dict["full_state"])
 
@@ -475,7 +477,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
                 if args_cli.baseline:
                     actions = agent.get_action(obs_dict["gc"])
                 else:
-                    actions = agent(obs_tensor)
+                    actions = agent(obs_dict)
                 actions_log[:, steps] = actions
                 times.append(time.time() - start)
 
@@ -483,10 +485,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
                     obs_dict, reward, terminated, truncated, info = envs.step(actions)
                     done_count += terminated.sum().item() + truncated.sum().item()
                 else:
-                    obs, reward, dones, extras = envs.step(actions)
+                    obs_dict, reward, dones, extras = envs.step(actions)
                     # print("Reward: ", reward)
                     done_count += dones.sum().item()
-                    obs_dict = extras["observations"]
+                    # obs_dict = extras["observations"]
                     info = extras
                 rewards[:, steps] = reward.detach()
 

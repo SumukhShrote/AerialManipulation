@@ -44,8 +44,19 @@ gym.register(
     },
 )
 
+# gym.register(
+#     id="Isaac-Crazyflie-0DOF-Hover-v0",
+#     entry_point="envs.crazyflie_ctatt.quadrotor_env:QuadrotorEnv",
+#     disable_env_checker=True,
+#     kwargs={
+#         "env_cfg_entry_point": BrushlessQuadrotorManipulatorEnvCfg,
+#         "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_cfg.yaml",
+#         "rsl_rl_cfg_entry_point": agents.rsl_rl_ppo_cfg.QuadrotorPPORunnerCfg,
+#         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
+#     },
+# )
 gym.register(
-    id="Isaac-Crazyflie-0DOF-Hover-v0",
+    id="Isaac-Crazyflie-0DOF-Ball_Catch-v0",
     entry_point="envs.crazyflie_ctatt.quadrotor_env:QuadrotorEnv",
     disable_env_checker=True,
     kwargs={
@@ -55,6 +66,7 @@ gym.register(
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
     },
 )
+
 
 gym.register(
     id="Isaac-CrazyflieManipulator-SRT-Hover-v0",

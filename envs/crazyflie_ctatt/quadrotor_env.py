@@ -9,33 +9,39 @@ import gymnasium as gym
 import torch
 import math
 
-import omni.isaac.lab.sim as sim_utils
-from omni.isaac.lab.assets import Articulation, ArticulationCfg
-from omni.isaac.lab.envs import DirectRLEnv, DirectRLEnvCfg
-from omni.isaac.lab.envs.ui import BaseEnvWindow
-from omni.isaac.lab.markers import VisualizationMarkers
-from omni.isaac.lab.scene import InteractiveSceneCfg
-from omni.isaac.lab.sim import SimulationCfg
-from omni.isaac.lab.terrains import TerrainImporterCfg
-from omni.isaac.lab.utils import configclass
-from omni.isaac.lab.utils.math import subtract_frame_transforms, random_yaw_orientation, matrix_from_quat, matrix_from_euler, quat_rotate_inverse, quat_rotate, normalize, wrap_to_pi, quat_apply
-from omni.isaac.lab.markers import VisualizationMarkers, VisualizationMarkersCfg
-from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR
+import isaaclab.sim as sim_utils
+from isaaclab.assets import Articulation, ArticulationCfg
+from isaaclab.assets import RigidObject, RigidObjectCfg
+from isaaclab.envs import DirectRLEnv, DirectRLEnvCfg
+from isaaclab.envs.ui import BaseEnvWindow
+from isaaclab.markers import VisualizationMarkers
+from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sim import SimulationCfg
+from isaaclab.terrains import TerrainImporterCfg
+from isaaclab.utils import configclass
+from isaaclab.utils.math import subtract_frame_transforms, random_yaw_orientation, matrix_from_quat, matrix_from_euler, quat_apply_inverse, quat_apply, normalize, wrap_to_pi, quat_apply, quat_error_magnitude, random_orientation
+from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+
+from isaaclab.sim.utils import get_prim_at_path
+from isaaclab.sim.spawners.shapes import SphereCfg
+from isaaclab.sim.spawners.materials import PreviewSurfaceCfg
+from pxr import Usd, UsdShade, Gf
 
 from utils.assets import MODELS_PATH
-from configs.aerial_manip_asset import CRAZYFLIE_MANIPULATOR_0DOF_CFG, CRAZYFLIE_MANIPULATOR_0DOF_LONG_CFG, CRAZYFLIE_BRUSHLESS_CFG, CRAZYFLIE_BRUSHLESS_MANIPULATOR_CFG
+from configs.aerial_manip_asset import CRAZYFLIE_MANIPULATOR_0DOF_CFG, CRAZYFLIE_MANIPULATOR_0DOF_LONG_CFG, CRAZYFLIE_BRUSHLESS_CFG, CRAZYFLIE_BRUSHLESS_MANIPULATOR_CFG, BALL_CFG
 from utils.math_utilities import yaw_from_quat, yaw_error_from_quats, quat_from_yaw, compute_desired_pose_from_transform, vee_map, exp_so3, hat_map
 import utils.flatness_utilities as flatness_utils
 import utils.trajectory_utilities as traj_utils
 import utils.math_utilities as math_utils
-import omni.isaac.lab.utils.math as isaac_math_utils
+import isaaclab.utils.math as isaac_math_utils
 
 
 ##
 # Pre-defined configs
 ##
-from omni.isaac.lab_assets import CRAZYFLIE_CFG  # isort: skip
-from omni.isaac.lab.markers import CUBOID_MARKER_CFG  # isort: skip
+from isaaclab_assets import CRAZYFLIE_CFG  # isort: skip
+from isaaclab.markers import CUBOID_MARKER_CFG  # isort: skip
 
 
 class QuadrotorEnvWindow(BaseEnvWindow):
@@ -80,7 +86,7 @@ class QuadrotorEnvCfg(DirectRLEnvCfg):
     sim: SimulationCfg = SimulationCfg(
         dt=1 / sim_rate_hz,
         render_interval=decimation,
-        disable_contact_processing=True,
+        #disable_contact_processing=True,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
             restitution_combine_mode="multiply",
@@ -102,6 +108,8 @@ class QuadrotorEnvCfg(DirectRLEnvCfg):
         ),
         debug_vis=False,
     )
+
+    ball: RigidObjectCfg = BALL_CFG.replace(prim_path="/World/envs/env_.*/Ball")
 
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=2.5, replicate_physics=True)
@@ -164,7 +172,18 @@ class QuadrotorEnvCfg(DirectRLEnvCfg):
     state_history_length = 0
 
     # reward scales
-    pos_distance_reward_scale = 15.0
+    # pos_distance_reward_scale = 15.0
+    pos_distance_reward_scale = 10.0
+    pos_exp_scale: float = 1.0
+    progress_reward_scale: float = 2.0
+    radial_velocity_bonus_scale: float = 0.5
+    overshoot_penalty_scale: float = -1.0
+    near_goal_exp_scale: float = 2.0
+    near_goal_vel_penalty_scale: float = -0.5
+    angular_vel_penalty_scale: float = -0.01
+    ball_catch_radius: float = 0.1
+    goal_respawn_interval: int = 150  # Steps
+    goal_pos_range: [-2.0, 2.0, -2.0, 2.0, 1.0]  # x_min, x_max, y_min, y_max, fixed_z
     pos_radius = 0.8
     pos_corse_reward_scale = 0.0
     pos_corse_radius = 0.8
@@ -172,17 +191,33 @@ class QuadrotorEnvCfg(DirectRLEnvCfg):
     pos_fine_radius = 0.1
     pos_radius_curriculum = 50_000_000
     pos_error_reward_scale= 0.0
-    lin_vel_reward_scale = -0.05
-    ang_vel_reward_scale = -0.01
-    yaw_error_reward_scale = -2.0
+    # lin_vel_reward_scale = -0.05
+    lin_vel_reward_scale = 0.0
+    # ang_vel_reward_scale = -0.01
+    ang_vel_reward_scale = 0.0
+    # yaw_error_reward_scale = -2.0
+    yaw_error_reward_scale = 0.0
     previous_thrust_reward_scale = -0.1
     previous_attitude_reward_scale = -0.1
     previous_action_reward_scale = [7e-3, 3e-3, 3e-3, 3e-3] # [thrust, roll, pitch, yaw]
     action_vec_norm_reward_scale = [ 0.0, 0.0, 0.0, 0.0] # [thrust, roll, pitch, yaw]
     action_norm_reward_scale = 0.0
-    stay_alive_reward = 0.0
-    crash_penalty = 0.0
+    stay_alive_reward = 0.1
+    # crash_penalty = 0.0
+    crash_penalty = -50.0
     scale_reward_with_time = True
+
+    ball_radius = 0.04
+    ball_error_threshold = ball_radius       # 0.04 m
+    ball_throw_height = 2.0                  # meters above terrain
+    ball_vel_vertical = (6.5, 9.0)           # (min, max) m/s upward
+    ball_vel_horizontal = 1.0                # ±m/s in x and y
+    use_catch_pos = True                      # track predicted catch point
+
+    # Reward scales (catching dominant, shaping secondary)
+    catch_reward_scale = 50.0
+    shaping_scale = 0.2                      # global multiplier on tracking rewards
+    shaping_gate_distance = 0.08             # disable shaping inside 2x ball radius
 
     ori_error_reward_scale = 0.0 # -0.5
     joint_vel_reward_scale = 0.0 # -0.01
@@ -319,7 +354,7 @@ class BrushlessQuadrotorEnvCfg(QuadrotorEnvCfg):
     sim: SimulationCfg = SimulationCfg(
         dt=1 / sim_rate_hz,
         render_interval=decimation,
-        disable_contact_processing=True,
+        #disable_contact_processing=True,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
             restitution_combine_mode="multiply",
@@ -394,7 +429,7 @@ class BrushlessQuadrotorManipulatorEnvCfg(QuadrotorEnvCfg):
     sim: SimulationCfg = SimulationCfg(
         dt=1 / sim_rate_hz,
         render_interval=decimation,
-        disable_contact_processing=True,
+        #disable_contact_processing=True,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
             restitution_combine_mode="multiply",
@@ -506,6 +541,32 @@ class QuadrotorEnv(DirectRLEnv):
         self.lissajous_phases_rand_ranges = torch.tensor(self.cfg.lissajous_phases_rand_ranges, device=self.device).float()
         self.lissajous_offsets = torch.tensor(self.cfg.lissajous_offsets, device=self.device).tile((self.num_envs, 1)).float()
         self.lissajous_offsets_rand_ranges = torch.tensor(self.cfg.lissajous_offsets_rand_ranges, device=self.device).float()
+        # ── Ball catching buffers ──────────────────────────────────────────
+        self._ball_pos_w  = torch.zeros(self.num_envs, 3, device=self.device)
+        self._ball_vel_w  = torch.zeros(self.num_envs, 3, device=self.device)
+        self._ball_ori_w  = torch.zeros(self.num_envs, 4, device=self.device)
+        self._catch_pose_w = torch.zeros(self.num_envs, 3, device=self.device)
+        self._catch_time  = torch.zeros_like(self.episode_length_buf)
+        self._prev_pos_error = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
+
+        #self.stage("post_physics_step").add(self._respawn_goals)
+
+        if not hasattr(self, "_episode_sums"):
+            self._episode_sums = {}
+
+        # Extend episode sums for new reward keys
+        for key in ["catch", "progress", "radial_bonus", "overshoot_penalty", "near_goal_vel_penalty"]:
+            self._episode_sums.setdefault(key, torch.zeros(self.num_envs, dtype=torch.float, device=self.device))
+        
+        # Base rewards (DirectRLEnv expects these)
+        base_keys = ["lin_vel", "ang_vel", "pos_distance", "pos_corse", "pos_fine", "pos_error", "yaw_error", "previous_thrust", "previous_attitude", "previous_action", "action_norm", "crash_penalty", "stay_alive"]
+        for key in base_keys:
+            if key not in self._episode_sums:
+                self._episode_sums[key] = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+
+        self._prev_pos_error[:] = 10.0
+        self._goal_respawn_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self._goal_pos_w = torch.zeros(self.num_envs, 3, device=self.device)
 
         self._time = torch.zeros(self.num_envs, 1, device=self.device)
         self.pos_radius_start = self.cfg.pos_radius
@@ -548,26 +609,6 @@ class QuadrotorEnv(DirectRLEnv):
 
         self.TM_to_f = torch.linalg.inv(self.f_to_TM)
 
-
-        # Logging
-        self._episode_sums = {
-            key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
-            for key in [
-                "lin_vel",
-                "ang_vel",
-                "pos_distance",
-                "pos_corse",
-                "pos_fine",
-                "pos_error",
-                "yaw_error",
-                "previous_thrust",
-                "previous_attitude",
-                "previous_action",
-                "action_norm",
-                "crash_penalty",
-                "stay_alive",
-            ]
-        }
         # Get specific body indices
         self._body_id = self._robot.find_bodies("body")[0]
         if self.cfg.has_end_effector:
@@ -670,6 +711,10 @@ class QuadrotorEnv(DirectRLEnv):
     def _setup_scene(self):
         self._robot = Articulation(self.cfg.robot)
         self.scene.articulations["robot"] = self._robot
+
+        # ADD: ball rigid object
+        self.ball = RigidObject(self.cfg.ball)
+        self.scene.rigid_objects["ball"] = self.ball
 
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
@@ -794,6 +839,87 @@ class QuadrotorEnv(DirectRLEnv):
         # print(f"Motor speeds desired:     {self._motor_speeds_des[0]}")
         # print(f"Actual motor speeds:      {self._motor_speeds[0]}")
         # print("--------------------------\n")
+
+    # def _respawn_goals(self, env_ids: torch.Tensor | None = None):
+    #     """Respawn goals after physics.step(), before get_rewards()/obs."""
+    #     if env_ids is None:
+    #         env_ids = self._robot._ALL_INDICES
+        
+    #     self._goal_respawn_steps[env_ids] += 1
+    #     respawn_mask = self._goal_respawn_steps[env_ids] >= self.cfg.goal_respawn_interval
+        
+    #     if respawn_mask.any():
+    #         respawn_ids = respawn_mask.nonzero(as_tuple=False).squeeze(-1)
+            
+    #         # Fixed z, random x/y (cfg: [x_min, x_max, y_min, y_max, fixed_z])
+    #         low_xy = torch.tensor([self.cfg.goal_pos_range[0], self.cfg.goal_pos_range[2]], device=self.device)
+    #         high_xy = torch.tensor([self.cfg.goal_pos_range[1], self.cfg.goal_pos_range[3]], device=self.device)
+    #         fixed_z = self.cfg.goal_pos_range[4]
+            
+    #         xy_rand = torch.rand((len(respawn_ids), 2), device=self.device) * (high_xy - low_xy) + low_xy
+    #         self._goal_pos_w[respawn_ids] = torch.cat([xy_rand, fixed_z * torch.ones((len(respawn_ids), 1), device=self.device)], dim=-1)
+            
+    #         self._prev_pos_error[respawn_ids] = torch.full((len(respawn_ids),), 10.0, device=self.device)
+    #         self._goal_respawn_steps[respawn_ids] = 0
+            
+    #         # Sync for logging/obs compatibility
+    #         self._desired_pos_w[respawn_ids] = self._goal_pos_w[respawn_ids]
+
+    def get_catch_point(self, pos_init: torch.Tensor, vel_init: torch.Tensor,
+                    env_ids: torch.Tensor, z_crossing: float = 0.5) -> torch.Tensor:
+        """Solve projectile motion to find x,y position when ball reaches z_crossing height."""
+        z_cross = torch.tensor(z_crossing, device=self.device).tile(pos_init.shape[0], 1).squeeze()
+        g = self.gravity_magnitude
+        # Quadratic: z(t) = z0 + vz*t - 0.5*g*t^2  →  solve for t
+        t = (vel_init[:, 2] + torch.sqrt(vel_init[:, 2]**2 + 2 * g * (pos_init[:, 2] - z_cross))) / g
+        self._catch_time[env_ids] = (t * self.cfg.policy_rate_hz).int() + self.episode_length_buf[env_ids]
+        x_crossing = pos_init[:, 0] + vel_init[:, 0] * t
+        y_crossing = pos_init[:, 1] + vel_init[:, 1] * t
+        return torch.stack([x_crossing.view(-1, 1), y_crossing.view(-1, 1),
+                            z_cross.view(-1, 1)], dim=1).squeeze(-1)
+
+    def mark_catch(self, env_ids: torch.Tensor) -> None:
+        """Stop ball and turn it green on catch."""
+        if len(env_ids) == 0 or env_ids.shape[0] == 0:
+            return
+        ball_vel = torch.zeros_like(self.ball.data.root_vel_w[env_ids], device=self.device)
+        self.ball.write_root_velocity_to_sim(ball_vel, env_ids=env_ids)
+        self.set_ball_color(env_ids, (0.0, 1.0, 0.0))
+
+    def rethrow_ball(self, env_ids: torch.Tensor) -> None:
+        """Re-throw the ball mid-episode (called periodically from _get_dones)."""
+        if env_ids is None or len(env_ids) == 0:
+            return
+        default_ball_state = self.ball.data.default_root_state[env_ids, :7].clone()
+        default_ball_state[:, :2] = torch.zeros_like(default_ball_state[:, :2])
+        default_ball_state[:, 2] = self.terrain.env_origins[env_ids, 2] + self.cfg.ball_throw_height
+        self.ball.write_root_pose_to_sim(default_ball_state[:, :7], env_ids=env_ids)
+        default_ball_vel = self.ball.data.default_root_state[env_ids, 7:].clone()
+        default_ball_vel[:, :2] = torch.zeros_like(default_ball_vel[:, :2]).uniform_(
+            -self.cfg.ball_vel_horizontal, self.cfg.ball_vel_horizontal
+        )
+        v_min, v_max = self.cfg.ball_vel_vertical
+        default_ball_vel[:, 2] = torch.zeros(len(env_ids), device=self.device).uniform_(v_min, v_max)
+        self.ball.write_root_velocity_to_sim(default_ball_vel, env_ids=env_ids)
+        self.set_ball_color(env_ids, (1.0, 0.0, 0.0))
+        self._catch_pose_w[env_ids] = self.get_catch_point(
+            default_ball_state[:, :3], default_ball_vel[:, :3], env_ids
+        )
+
+    def set_ball_color(self, env_ids: torch.Tensor, color: tuple) -> None:
+        """Change ball USD material color (red=in-flight, green=caught)."""
+        if len(env_ids) == 0:
+            return
+        for i in range(env_ids.shape[0]):
+            env_id = env_ids[i]
+            prim_path = f"/World/envs/env_{env_id.item()}/Ball/geometry/material/Shader"
+            prim = get_prim_at_path(prim_path)
+            if prim:
+                shader = UsdShade.Shader(prim)
+                if shader:
+                    shader.GetInput("diffuseColor").Set(Gf.Vec3f(*color))
+
+
 
     def _apply_action(self):
         # Skip low-level motor dynamics
@@ -949,12 +1075,27 @@ class QuadrotorEnv(DirectRLEnv):
         """
         Returns the observation dictionary. Policy observations are in the key "policy".
         """
-        self._apply_curriculum(self.common_step_counter * self.num_envs)
-        self.update_goal_state()
+        # self._apply_curriculum(self.common_step_counter * self.num_envs)
+        # self.update_goal_state()
         
         
         base_pos_w, base_ori_w, lin_vel_w, ang_vel_w = self.get_frame_state_from_task(self.cfg.task_body)
         goal_pos_w, goal_ori_w = self.get_goal_state_from_task(self.cfg.goal_body)
+
+        # ── CHANGED: Update ball state and set goal to catch point ────────
+        self._ball_pos_w = self.ball.data.root_pos_w.clone()
+        self._ball_vel_w = self.ball.data.root_vel_w[:, :3].clone()
+        self._ball_ori_w = self.ball.data.root_quat_w.clone()
+
+        if self.cfg.use_catch_pos:
+            self._desired_pos_w = self._catch_pose_w
+            yaw_angle_w = torch.atan2(self._ball_vel_w[:, 1], self._ball_vel_w[:, 0])
+            self.desired_ori_w = quat_from_yaw(yaw_angle_w)
+        else:
+            self._desired_pos_w = self._ball_pos_w
+            self.desired_ori_w = self._ball_ori_w
+        # ── Everything below (pos error, ori error, obs cat, etc.) UNCHANGED ──
+
 
 
         # Find the error of the end-effector to the desired position and orientation
@@ -962,11 +1103,16 @@ class QuadrotorEnv(DirectRLEnv):
         # Batched over number of environments, returns (num_envs, 3) and (num_envs, 4) tensors
         # pos_error_b, ori_error_b = subtract_frame_transforms(self._desired_pos_w, self._desired_ori_w, 
         #                                                      base_pos, base_ori)
-        pos_error_b, ori_error_b = subtract_frame_transforms(
-            base_pos_w, base_ori_w, 
-            # self._desired_pos_w, self._desired_ori_w
-            goal_pos_w, goal_ori_w
-        )
+        # pos_error_b, ori_error_b = subtract_frame_transforms(
+        #     base_pos_w, base_ori_w, 
+        #     # self._desired_pos_w, self._desired_ori_w
+        #     goal_pos_w, goal_ori_w
+        # )
+
+        ball_pos_error_b = goal_pos_w - base_pos_w  # N x 3 
+        ori_error_b = subtract_frame_transforms(
+                            base_pos_w, base_ori_w, goal_pos_w, goal_ori_w
+                        )[1]  # Just ori part
 
         future_pos_error_b = []
         future_ori_error_b = []
@@ -1007,7 +1153,7 @@ class QuadrotorEnv(DirectRLEnv):
             ori_representation_b = torch.zeros(self.num_envs, 0, device=self.device)
 
         if self.cfg.use_grav_vector:
-            grav_vector_b = quat_rotate_inverse(base_ori_w, self._grav_vector_unit) # projected gravity vector in the cfg frame
+            grav_vector_b = quat_apply_inverse(base_ori_w, self._grav_vector_unit) # projected gravity vector in the cfg frame
         else:
             grav_vector_b = torch.zeros(self.num_envs, 0, device=self.device)
 
@@ -1034,8 +1180,8 @@ class QuadrotorEnv(DirectRLEnv):
         
         # Old computation for lin and ang vel:
         lin_vel_error_w = self._pos_traj[1, :, :, 0] - lin_vel_w
-        lin_vel_b = quat_rotate_inverse(base_ori_w, lin_vel_error_w)
-        ang_vel_b = quat_rotate_inverse(base_ori_w, ang_vel_w)
+        lin_vel_b = quat_apply_inverse(base_ori_w, lin_vel_error_w)
+        ang_vel_b = quat_apply_inverse(base_ori_w, ang_vel_w)
 
 
         # Compute the joint states
@@ -1096,7 +1242,7 @@ class QuadrotorEnv(DirectRLEnv):
                 base_pos_w - goal_pos_w,                                        # (num_envs, 3)
                 lin_vel_w - self._pos_traj[1, :, :, 0].view(self.num_envs, 3),  # (num_envs, 3)
                 base_ori_w,                                                     # (num_envs, 4) 
-                isaac_math_utils.quat_rotate_inverse(base_ori_w, ang_vel_w),    # (num_envs, 3) 
+                isaac_math_utils.quat_apply_inverse(base_ori_w, ang_vel_w),    # (num_envs, 3) 
             ], dim=-1)
 
             if self.cfg.state_history_length > 0:
@@ -1122,7 +1268,7 @@ class QuadrotorEnv(DirectRLEnv):
         else:
             obs = torch.cat(
                 [
-                    pos_error_b,                                # (num_envs, 3)
+                    ball_pos_error_b,                           # (num_envs, 3)
                     ori_representation_b,                       # (num_envs, 0) if not using full ori matrix, (num_envs, 9) if using full ori matrix
                     yaw_representation,                         # (num_envs, 4) if using yaw representation (quat), 0 otherwise
                     grav_vector_b,                              # (num_envs, 3) if using gravity vector, 0 otherwise
@@ -1180,7 +1326,7 @@ class QuadrotorEnv(DirectRLEnv):
                     quad_ori_w,                                 # (num_envs, 4)
                     quad_lin_vel_w,                             # (num_envs, 3)
                     quad_ang_vel_w,                             # (num_envs, 3)
-                    goal_pos_w,                                 # (num_envs, 3)
+                    ball_pos_error_b + quad_pos_w,              # (num_envs, 3)
                     yaw_from_quat(goal_ori_w).unsqueeze(1),     # (num_envs, 1)
                     future_com_pos_w.flatten(-2, -1),            # (num_envs, horizon * 3)
                     future_com_ori_w.flatten(-2, -1)            # (num_envs, horizon * 4)
@@ -1229,297 +1375,676 @@ class QuadrotorEnv(DirectRLEnv):
             
         return {"policy": obs, "gc": gc_obs, "full_state": full_state}
 
+    # def _get_rewards(self) -> torch.Tensor:
+    #     base_pos_w, base_ori_w, lin_vel_w, ang_vel_w = self.get_frame_state_from_task(self.cfg.reward_task_body)
+    #     goal_pos_w, goal_ori_w = self.get_goal_state_from_task(self.cfg.reward_goal_body)
+        
+    #     # Computes the error from the desired position and orientation
+    #     pos_error = torch.linalg.norm(goal_pos_w - base_pos_w, dim=1)
+    #     # pos_distance = 1.0 - torch.tanh(pos_error / self.cfg.pos_radius)
+    #     if self.cfg.square_pos_error:
+    #         pos_distance = torch.exp(- (pos_error **2) / self.cfg.pos_radius)
+    #         pos_corse_distance = torch.exp(- (pos_error**2) / self.cfg.pos_corse_radius)
+    #         pos_fine_distance = torch.exp(- (pos_error ** 0.4) / self.cfg.pos_fine_radius)
+    #     else:
+    #         pos_distance = torch.exp(- (pos_error) / self.cfg.pos_radius)
+    #         pos_corse_distance = torch.exp(- (pos_error) / self.cfg.pos_corse_radius)
+    #         pos_fine_distance = torch.exp(- pos_error / self.cfg.pos_fine_radius)
+
+    #     ori_error = isaac_math_utils.quat_error_magnitude(goal_ori_w, base_ori_w)
+        
+    #     goal_yaw_w = isaac_math_utils.yaw_quat(goal_ori_w)
+    #     current_yaw_w = isaac_math_utils.yaw_quat(base_ori_w)
+    #     # yaw_error_w = quat_mul(quat_inv(current_yaw_w), goal_yaw_w)
+    #     # yaw_error = quat_error_magnitude(yaw_error_w, torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).tile((self.num_envs, 1)))
+
+    #     smooth_transition_func = 1.0 - torch.exp(-1.0 / torch.max(self.cfg.yaw_smooth_transition_scale*pos_error - 10.0, torch.zeros_like(pos_error)))
+
+    #     # other_yaw_error = yaw_error_from_quats(goal_yaw_w, current_yaw_w, self.cfg.num_joints).unsqueeze(1)
+    #     yaw_error = yaw_error_from_quats(goal_ori_w, base_ori_w, self.cfg.num_joints).unsqueeze(1)
+    #     # other_yaw_error = torch.sum(torch.square(other_yaw_error), dim=1)
+    #     yaw_error = torch.linalg.norm(yaw_error, dim=1)
+
+    #     # yaw_distance = (1.0 - torch.tanh(yaw_error / self.cfg.yaw_radius)) * smooth_transition_func
+    #     yaw_distance = torch.exp(- (yaw_error **2) / self.cfg.yaw_radius)
+    #     yaw_error = yaw_error * smooth_transition_func
+
+    #     # combined_error = (pos_error)**2 + (yaw_error * self.arm_length)**2
+    #     # combined_error = pos_error/self.cfg.goal_pos_range + (yaw_error/self.cfg.goal_yaw_range)*self.arm_length
+    #     # combined_reward = (1 + torch.exp(self.cfg.combined_alpha * (combined_error - self.cfg.combined_tolerance)))**-1
+    #     # combined_distance = combined_reward
+
+    #     # Velocity error components, used for stabliization tuning
+    #     if self.cfg.trajectory_horizon > 0:
+    #         lin_vel_error_w = self._pos_traj[1, :, :, 0] - lin_vel_w
+    #     else:
+    #         lin_vel_error_w = torch.zeros_like(lin_vel_w, device=self.device) - lin_vel_w
+    #     lin_vel_b = quat_rotate_inverse(base_ori_w, lin_vel_error_w)
+    #     if self.cfg.use_ang_vel_from_trajectory and self.cfg.trajectory_horizon > 0:
+    #         ang_vel_des = torch.zeros_like(ang_vel_w)
+    #         ang_vel_des[:,2] = self._yaw_traj[1, :, 0]
+    #         ang_vel_error_w = ang_vel_des - ang_vel_w
+    #     else:
+    #         ang_vel_error_w = torch.zeros_like(ang_vel_w) - ang_vel_w
+    #     ang_vel_b = quat_rotate_inverse(base_ori_w, ang_vel_error_w)
+    #     # lin_vel_error = torch.linalg.norm(lin_vel_b, dim=-1)
+    #     # ang_vel_error = torch.linalg.norm(ang_vel_b, dim=-1)
+    #     # lin_vel_error = torch.sum(torch.square(lin_vel_b), dim=1)
+    #     lin_vel_error = torch.norm(lin_vel_b, dim=1)
+    #     # ang_vel_error = torch.sum(torch.square(ang_vel_b), dim=1)
+    #     ang_vel_error = torch.norm(ang_vel_b, dim=1)
+
+    #     # action_error = torch.sum(torch.square(self._actions - self._previous_action), dim=1)
+    #     action_thrust_error = torch.square(self._actions[:, 0] - self._previous_action[:, 0])
+    #     action_att_error = torch.sum(torch.square(self._actions[:, 1:] - self._previous_action[:, 1:]), dim=1)
+    #     # action_norm_error = torch.sum(torch.square(self._actions - self._nominal_action), dim=1)
+    #     action_norm_error = torch.linalg.norm(self._actions[:,1:], dim=1)
+
+    #     self._previous_action = self._actions.clone()
+    #     crash_penalty_time = self.cfg.crash_penalty * (self.max_episode_length - self.episode_length_buf)
+
+    #     if self.cfg.scale_reward_with_time:
+    #         time_scale = self.step_dt
+    #     else:
+    #         time_scale = 1.0
+
+    #     if self.cfg.rotorpy_reward:
+    #         rewards = {
+    #             "pos_error": torch.linalg.norm(base_pos_w - goal_pos_w, dim=1) * self.cfg.pos_error_reward_scale * time_scale,
+    #             "lin_vel": torch.linalg.norm(lin_vel_w, dim=1) * self.cfg.lin_vel_reward_scale * time_scale,
+    #             "ang_vel": torch.linalg.norm(isaac_math_utils.quat_rotate_inverse(base_ori_w, ang_vel_w), dim=1) * self.cfg.ang_vel_reward_scale * time_scale,
+    #             "yaw_error": torch.abs(math_utils.yaw_from_quat(base_ori_w)) * self.cfg.yaw_error_reward_scale * time_scale,
+    #             "previous_action": ((self._actions - torch.mean(self._action_history, dim=1))**2).reshape((-1, 4)) @ torch.tensor(self.cfg.previous_action_reward_scale, device=self.device).reshape((4,)) * time_scale,  # Placeholder for rotorpy reward
+    #             "action_norm": torch.abs(self._actions).view((-1, 4)) @ torch.tensor(self.cfg.action_vec_norm_reward_scale, device=self.device).reshape((4,)) * time_scale,  # Placeholder for rotorpy reward
+    #             "stay_alive": torch.ones_like(pos_error) * self.cfg.stay_alive_reward,
+    #         }
+    #     else:
+    #         rewards = {
+    #             "lin_vel": lin_vel_error * self.cfg.lin_vel_reward_scale * time_scale,
+    #             "ang_vel": ang_vel_error * self.cfg.ang_vel_reward_scale * time_scale,
+    #             "pos_distance": pos_distance * self.cfg.pos_distance_reward_scale * time_scale,
+    #             "pos_corse": pos_corse_distance * self.cfg.pos_corse_reward_scale * time_scale,
+    #             "pos_fine": pos_fine_distance * self.cfg.pos_fine_reward_scale * time_scale,
+    #             "pos_error": pos_error * self.cfg.pos_error_reward_scale * time_scale,
+    #             "yaw_error": ori_error * self.cfg.yaw_error_reward_scale * time_scale,
+    #             "previous_thrust": action_thrust_error * self.cfg.previous_thrust_reward_scale * time_scale,
+    #             "previous_attitude": action_att_error * self.cfg.previous_attitude_reward_scale * time_scale,
+    #             "previous_action": action_norm_error * 0.0 * time_scale,
+    #             "action_norm": action_norm_error * self.cfg.action_norm_reward_scale * time_scale,
+    #             "crash_penalty": self.reset_terminated[:].float() * crash_penalty_time * time_scale,
+    #             "stay_alive": torch.ones_like(pos_error) * self.cfg.stay_alive_reward * time_scale,
+    #         }
+        
+    #     reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
+    #     # print("[Isaac] pos error: ", distance_to_goal)
+    #     # print("[Isaac] pos error reward: ", rewards["pos_error"])
+    #     # print("[Isaac] yaw error: ", rewards["yaw_error"])
+    #     # Logging
+    #     for key, value in rewards.items():
+    #         self._episode_sums[key] += value
+    #     return reward
+
+    # def _get_rewards(self) -> torch.Tensor:
+    #     base_pos_w, base_ori_w, lin_vel_w, ang_vel_w = self.get_frame_state_from_task(self.cfg.reward_task_body)
+    #     goal_pos_w, goal_ori_w = self.get_goal_state_from_task(self.cfg.reward_goal_body)
+        
+    #     pos_error_vec = goal_pos_w - base_pos_w
+    #     pos_error = torch.linalg.norm(pos_error_vec, dim=1)
+        
+    #     # Exponential distance (like pos_distance)
+    #     pos_reward = torch.exp(-self.cfg.pos_exp_scale * pos_error) * self.cfg.pos_distance_reward_scale
+        
+    #     # Progress (potential shaping)
+    #     progress_reward = (self._prev_pos_error - pos_error) * self.cfg.progress_reward_scale
+        
+    #     # Radial velocity
+    #     direction = pos_error_vec / (pos_error.unsqueeze(-1) + 1e-6)
+    #     radial_velocity = torch.sum(lin_vel_w * direction, dim=1)
+    #     radial_bonus = torch.relu(radial_velocity) * self.cfg.radial_velocity_bonus_scale
+    #     overshoot_penalty = torch.relu(-radial_velocity) * self.cfg.overshoot_penalty_scale
+        
+    #     # Near-goal velocity (like lin_vel but gated)
+    #     vel_norm = torch.linalg.norm(lin_vel_w, dim=1)
+    #     near_goal_vel_penalty = vel_norm * torch.exp(-self.cfg.near_goal_exp_scale * pos_error) * self.cfg.near_goal_vel_penalty_scale
+        
+    #     # Angular stability (like ang_vel)
+    #     ang_vel_norm = torch.linalg.norm(ang_vel_w, dim=1)
+    #     ang_vel_penalty = ang_vel_norm * self.cfg.angular_vel_penalty_scale
+        
+    #     # Catch bonus + penalties (like crash_penalty)
+    #     catch_bonus = (pos_error < self.cfg.ball_catch_radius).float() * 50.0
+    #     stay_alive = torch.ones_like(pos_error) * self.cfg.stay_alive_reward
+    #     crash_penalty = self.reset_terminated.float() * self.cfg.crash_penalty
+        
+    #     # Dict + time_scale EXACTLY like original
+    #     rewards = {
+    #         "pos_reward": pos_reward,
+    #         "progress": progress_reward,
+    #         "radial_bonus": radial_bonus,
+    #         "overshoot_penalty": overshoot_penalty,
+    #         "near_goal_vel_penalty": near_goal_vel_penalty,
+    #         "ang_vel_penalty": ang_vel_penalty,
+    #         "catch_bonus": catch_bonus,
+    #         "stay_alive": stay_alive,
+    #         "crash_penalty": crash_penalty,
+    #     }
+        
+    #     # Sum EXACTLY like original
+    #     reward = torch.sum(torch.stack(list(rewards.values()), dim=0))
+        
+    #     # Logging EXACTLY like original
+    #     for key, value in rewards.items():
+    #         self._episode_sums[key] += value
+        
+    #     # Update progress EXACTLY like original previous_action
+    #     self._prev_pos_error = pos_error.clone()
+        
+    #     return reward
+
     def _get_rewards(self) -> torch.Tensor:
         base_pos_w, base_ori_w, lin_vel_w, ang_vel_w = self.get_frame_state_from_task(self.cfg.reward_task_body)
-        goal_pos_w, goal_ori_w = self.get_goal_state_from_task(self.cfg.reward_goal_body)
-        
-        # Computes the error from the desired position and orientation
-        pos_error = torch.linalg.norm(goal_pos_w - base_pos_w, dim=1)
-        # pos_distance = 1.0 - torch.tanh(pos_error / self.cfg.pos_radius)
-        if self.cfg.square_pos_error:
-            pos_distance = torch.exp(- (pos_error **2) / self.cfg.pos_radius)
-            pos_corse_distance = torch.exp(- (pos_error**2) / self.cfg.pos_corse_radius)
-            pos_fine_distance = torch.exp(- (pos_error ** 0.4) / self.cfg.pos_fine_radius)
-        else:
-            pos_distance = torch.exp(- (pos_error) / self.cfg.pos_radius)
-            pos_corse_distance = torch.exp(- (pos_error) / self.cfg.pos_corse_radius)
-            pos_fine_distance = torch.exp(- pos_error / self.cfg.pos_fine_radius)
 
-        ori_error = isaac_math_utils.quat_error_magnitude(goal_ori_w, base_ori_w)
-        
-        goal_yaw_w = isaac_math_utils.yaw_quat(goal_ori_w)
-        current_yaw_w = isaac_math_utils.yaw_quat(base_ori_w)
-        # yaw_error_w = quat_mul(quat_inv(current_yaw_w), goal_yaw_w)
-        # yaw_error = quat_error_magnitude(yaw_error_w, torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).tile((self.num_envs, 1)))
+        # ── Catch detection (PRIMARY sparse signal) ───────────────────
+        ball_pos_w = self.ball.data.root_pos_w
+        ball_catch_pos_error = torch.linalg.norm(ball_pos_w[:, :2] - base_pos_w[:, :2], dim=1)
+        time_to_catch = (self.episode_length_buf - self._catch_time) == 0
+        catch_mask = torch.logical_and(ball_catch_pos_error < self.cfg.ball_error_threshold, time_to_catch)
+        catch_ids = catch_mask.nonzero(as_tuple=False).squeeze(-1)
+        self.mark_catch(catch_ids)
 
-        smooth_transition_func = 1.0 - torch.exp(-1.0 / torch.max(self.cfg.yaw_smooth_transition_scale*pos_error - 10.0, torch.zeros_like(pos_error)))
+        # ── Position tracking shaping (SECONDARY dense signal) ────────
+        dist_to_goal = torch.linalg.norm(self._catch_pose_w - base_pos_w, dim=1)
+        shaping_mask = (dist_to_goal > self.cfg.shaping_gate_distance).float()  # gate near catch point
 
-        # other_yaw_error = yaw_error_from_quats(goal_yaw_w, current_yaw_w, self.cfg.num_joints).unsqueeze(1)
-        yaw_error = yaw_error_from_quats(goal_ori_w, base_ori_w, self.cfg.num_joints).unsqueeze(1)
-        # other_yaw_error = torch.sum(torch.square(other_yaw_error), dim=1)
-        yaw_error = torch.linalg.norm(yaw_error, dim=1)
+        # Progress: reward closing distance each step
+        progress_reward = (self._prev_pos_error - dist_to_goal).clamp(min=0.0) \
+                        * self.cfg.progress_reward_scale * self.cfg.shaping_scale * shaping_mask
 
-        # yaw_distance = (1.0 - torch.tanh(yaw_error / self.cfg.yaw_radius)) * smooth_transition_func
-        yaw_distance = torch.exp(- (yaw_error **2) / self.cfg.yaw_radius)
-        yaw_error = yaw_error * smooth_transition_func
+        # Exponential distance reward
+        pos_reward = torch.exp(-self.cfg.pos_exp_scale * dist_to_goal) \
+                    * self.cfg.pos_distance_reward_scale * self.cfg.shaping_scale * shaping_mask
 
-        # combined_error = (pos_error)**2 + (yaw_error * self.arm_length)**2
-        # combined_error = pos_error/self.cfg.goal_pos_range + (yaw_error/self.cfg.goal_yaw_range)*self.arm_length
-        # combined_reward = (1 + torch.exp(self.cfg.combined_alpha * (combined_error - self.cfg.combined_tolerance)))**-1
-        # combined_distance = combined_reward
+        # Radial velocity bonus: reward moving toward catch point
+        to_goal = self._catch_pose_w - base_pos_w
+        to_goal_unit = to_goal / (torch.linalg.norm(to_goal, dim=1, keepdim=True) + 1e-6)
+        radial_vel = torch.sum(lin_vel_w * to_goal_unit, dim=1)
+        radial_bonus = torch.relu(radial_vel) \
+                    * self.cfg.radial_velocity_bonus_scale * self.cfg.shaping_scale * shaping_mask
 
-        # Velocity error components, used for stabliization tuning
-        if self.cfg.trajectory_horizon > 0:
-            lin_vel_error_w = self._pos_traj[1, :, :, 0] - lin_vel_w
-        else:
-            lin_vel_error_w = torch.zeros_like(lin_vel_w, device=self.device) - lin_vel_w
-        lin_vel_b = quat_rotate_inverse(base_ori_w, lin_vel_error_w)
-        if self.cfg.use_ang_vel_from_trajectory and self.cfg.trajectory_horizon > 0:
-            ang_vel_des = torch.zeros_like(ang_vel_w)
-            ang_vel_des[:,2] = self._yaw_traj[1, :, 0]
-            ang_vel_error_w = ang_vel_des - ang_vel_w
-        else:
-            ang_vel_error_w = torch.zeros_like(ang_vel_w) - ang_vel_w
-        ang_vel_b = quat_rotate_inverse(base_ori_w, ang_vel_error_w)
-        # lin_vel_error = torch.linalg.norm(lin_vel_b, dim=-1)
-        # ang_vel_error = torch.linalg.norm(ang_vel_b, dim=-1)
-        # lin_vel_error = torch.sum(torch.square(lin_vel_b), dim=1)
-        lin_vel_error = torch.norm(lin_vel_b, dim=1)
-        # ang_vel_error = torch.sum(torch.square(ang_vel_b), dim=1)
-        ang_vel_error = torch.norm(ang_vel_b, dim=1)
+        # Overshoot penalty: moving away when close
+        overshoot_penalty = torch.relu(-radial_vel) \
+                            * self.cfg.overshoot_penalty_scale * self.cfg.shaping_scale * shaping_mask
 
-        # action_error = torch.sum(torch.square(self._actions - self._previous_action), dim=1)
-        action_thrust_error = torch.square(self._actions[:, 0] - self._previous_action[:, 0])
-        action_att_error = torch.sum(torch.square(self._actions[:, 1:] - self._previous_action[:, 1:]), dim=1)
-        # action_norm_error = torch.sum(torch.square(self._actions - self._nominal_action), dim=1)
-        action_norm_error = torch.linalg.norm(self._actions[:,1:], dim=1)
+        # Near-goal velocity penalty: penalize high speed near catch point
+        vel_norm = torch.linalg.norm(lin_vel_w, dim=1)
+        near_goal_vel_penalty = vel_norm * torch.exp(-self.cfg.near_goal_exp_scale * dist_to_goal) \
+                                * self.cfg.near_goal_vel_penalty_scale * self.cfg.shaping_scale
 
-        self._previous_action = self._actions.clone()
-        crash_penalty_time = self.cfg.crash_penalty * (self.max_episode_length - self.episode_length_buf)
+        # Angular velocity penalty (stability, keep from file:2)
+        ang_vel_norm = torch.linalg.norm(ang_vel_w, dim=1)
+        ang_vel_penalty = ang_vel_norm * self.cfg.angular_vel_penalty_scale
 
-        if self.cfg.scale_reward_with_time:
-            time_scale = self.step_dt
-        else:
-            time_scale = 1.0
+        # Stay-alive and crash (keep from file:2)
+        stay_alive = torch.ones_like(dist_to_goal) * self.cfg.stay_alive_reward
+        crash_penalty = self.reset_terminated.float() * self.cfg.crash_penalty
 
-        if self.cfg.rotorpy_reward:
-            rewards = {
-                "pos_error": torch.linalg.norm(base_pos_w - goal_pos_w, dim=1) * self.cfg.pos_error_reward_scale * time_scale,
-                "lin_vel": torch.linalg.norm(lin_vel_w, dim=1) * self.cfg.lin_vel_reward_scale * time_scale,
-                "ang_vel": torch.linalg.norm(isaac_math_utils.quat_rotate_inverse(base_ori_w, ang_vel_w), dim=1) * self.cfg.ang_vel_reward_scale * time_scale,
-                "yaw_error": torch.abs(math_utils.yaw_from_quat(base_ori_w)) * self.cfg.yaw_error_reward_scale * time_scale,
-                "previous_action": ((self._actions - torch.mean(self._action_history, dim=1))**2).reshape((-1, 4)) @ torch.tensor(self.cfg.previous_action_reward_scale, device=self.device).reshape((4,)) * time_scale,  # Placeholder for rotorpy reward
-                "action_norm": torch.abs(self._actions).view((-1, 4)) @ torch.tensor(self.cfg.action_vec_norm_reward_scale, device=self.device).reshape((4,)) * time_scale,  # Placeholder for rotorpy reward
-                "stay_alive": torch.ones_like(pos_error) * self.cfg.stay_alive_reward,
-            }
-        else:
-            rewards = {
-                "lin_vel": lin_vel_error * self.cfg.lin_vel_reward_scale * time_scale,
-                "ang_vel": ang_vel_error * self.cfg.ang_vel_reward_scale * time_scale,
-                "pos_distance": pos_distance * self.cfg.pos_distance_reward_scale * time_scale,
-                "pos_corse": pos_corse_distance * self.cfg.pos_corse_reward_scale * time_scale,
-                "pos_fine": pos_fine_distance * self.cfg.pos_fine_reward_scale * time_scale,
-                "pos_error": pos_error * self.cfg.pos_error_reward_scale * time_scale,
-                "yaw_error": ori_error * self.cfg.yaw_error_reward_scale * time_scale,
-                "previous_thrust": action_thrust_error * self.cfg.previous_thrust_reward_scale * time_scale,
-                "previous_attitude": action_att_error * self.cfg.previous_attitude_reward_scale * time_scale,
-                "previous_action": action_norm_error * 0.0 * time_scale,
-                "action_norm": action_norm_error * self.cfg.action_norm_reward_scale * time_scale,
-                "crash_penalty": self.reset_terminated[:].float() * crash_penalty_time * time_scale,
-                "stay_alive": torch.ones_like(pos_error) * self.cfg.stay_alive_reward * time_scale,
-            }
-        
+        # Update prev error for next step
+        self._prev_pos_error = dist_to_goal.clone()
+
+        rewards = {
+            "catch":                 catch_mask.float() * self.cfg.catch_reward_scale,  # dominant
+            "progress":              progress_reward,
+            "pos_distance":           pos_reward,
+            "radial_bonus":   radial_bonus,
+            "overshoot_penalty":      overshoot_penalty,
+            "near_goal_vel_penalty":    near_goal_vel_penalty,
+            "ang_vel":     ang_vel_penalty,
+            "stay_alive":             stay_alive,
+            "crash_penalty":          crash_penalty,
+        }
+
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
-        # print("[Isaac] pos error: ", distance_to_goal)
-        # print("[Isaac] pos error reward: ", rewards["pos_error"])
-        # print("[Isaac] yaw error: ", rewards["yaw_error"])
-        # Logging
+
         for key, value in rewards.items():
             self._episode_sums[key] += value
+
         return reward
 
+
+
+    # def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
+    #     """
+    #     Returns the tensors corresponding to termination and truncation. 
+    #     """
+    #     time_out = self.episode_length_buf >= self.max_episode_length - 1
+
+    #     # Check if end effector or body has collided with the ground
+    #     if self.cfg.has_end_effector:
+    #         died = torch.logical_or(self._robot.data.root_pos_w[:, 2] < 0.0, self._robot.data.body_state_w[:, self._body_id, 2].squeeze() < 0.0)
+    #     else:
+    #         if self.cfg.rotorpy_done:
+    #             died = torch.logical_or(torch.any(self._robot.data.root_vel_w[:,:].abs() > 100.0, dim=1), torch.any(self._robot.data.root_ang_vel_w[:,:].abs() > 100.0, dim=1))
+
+
+    #             # Check if the robot has moved too far from the trajectory
+    #             died = torch.logical_or(died, torch.any(torch.abs(self._robot.data.root_pos_w[:, :] - self._pos_traj[0, :, :, 0]) > 4.0, dim=1))
+
+    #             # died = torch.logical_or(died, torch.abs(self._robot.data.root_pos_w[:, 2] ))
+
+    #             # import code; code.interact(local=locals())
+    #             # died = torch.logical_or(died, torch.any(torch.abs(self._robot.data.root_pos_w[:, :2] - self._terrain.env_origins[:,:2]) > 4.0, dim=1))
+    #         else:
+    #             died = torch.logical_or(self._robot.data.root_pos_w[:, 2] < 0.1, self._robot.data.body_state_w[:, self._body_id, 2].squeeze() < 0.0)
+
+    #     # Check if the robot is too high
+    #     # died = torch.logical_or(died, self._robot.data.root_pos_w[:, 2] > 10.0)
+
+    #     if died[0] or time_out[0]:
+    #         print("[Isaac Env: Dones] Robot has died: ", died[0].item(), " Time out: ", time_out[0].item())
+    #         print("[Isaac Env: Dones] Robot position: ", self._robot.data.root_pos_w[0] - self._pos_traj[0, 0, :, 0])
+    #         print("[Isaac Env: Dones] Robot velocity: ", self._robot.data.root_lin_vel_w[0])
+    #         print("[Isaac Env: Dones] Robot angular velocity: ", self._robot.data.root_ang_vel_w[0])
+
+        
+    #     return died, time_out
+    # def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
+    #     """
+    #     Termination: crash (z<0), catch success, or timeout.
+    #     """
+    #     time_out = self.episode_length_buf >= self.max_episode_length - 1
+        
+    #     # Get states for catch check (like rewards)
+    #     base_pos_w, _, _, _ = self.get_frame_state_from_task(self.cfg.reward_task_body)
+    #     goal_pos_w, _ = self.get_goal_state_from_task(self.cfg.reward_goal_body)
+    #     pos_error = torch.linalg.norm(goal_pos_w - base_pos_w, dim=1)
+        
+    #     # NEW: Positive termination on successful catch
+    #     catch_success = pos_error < self.cfg.ball_catch_radius
+        
+    #     # Existing crashes
+    #     if self.cfg.has_end_effector:
+    #         died = torch.logical_or(
+    #             self._robot.data.root_pos_w[:, 2] < 0.0, 
+    #             self._robot.data.body_state_w[:, self._body_id, 2].squeeze() < 0.0
+    #         )
+    #     else:
+    #         if self.cfg.rotorpy_done:
+    #             died = torch.logical_or(
+    #                 torch.any(self._robot.data.root_vel_w.abs() > 100.0, dim=1),
+    #                 torch.any(self._robot.data.root_ang_vel_w.abs() > 100.0, dim=1)
+    #             )
+    #             # DISABLE trajectory distance (not needed for ball-catching)
+    #             # died = torch.logical_or(died, torch.any(torch.abs(self._robot.data.root_pos_w[:, :] - self._pos_traj[0, :, :, 0]) > 4.0, dim=1))
+    #         else:
+    #             died = torch.logical_or(
+    #                 self._robot.data.root_pos_w[:, 2] < 0.1, 
+    #                 self._robot.data.body_state_w[:, self._body_id, 2].squeeze() < 0.0
+    #             )
+        
+    #     # COMBINE: die on crash OR catch success
+    #     died = torch.logical_or(died, catch_success)
+        
+    #     # Logging (add catch info)
+    #     if died[0] or time_out[0]:
+    #         print(f"[Isaac Env: Dones] Died: {died[0].item()}, Timeout: {time_out[0].item()}, Catch: {catch_success[0].item()}")
+    #         print(f"[Isaac Env: Dones] Pos error: {pos_error[0].item():.3f}, Goal: {goal_pos_w[0]}, Base: {base_pos_w[0]}")
+        
+    #     return died, time_out
+
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Returns the tensors corresponding to termination and truncation. 
-        """
-        time_out = self.episode_length_buf >= self.max_episode_length - 1
+        timeout = self.episode_length_buf >= self.max_episode_length - 1
 
-        # Check if end effector or body has collided with the ground
+        # Existing crash detection (UNCHANGED from file:18)
         if self.cfg.has_end_effector:
-            died = torch.logical_or(self._robot.data.root_pos_w[:, 2] < 0.0, self._robot.data.body_state_w[:, self._body_id, 2].squeeze() < 0.0)
+            died = torch.logical_or(
+                self._robot.data.root_pos_w[:, 2] < 0.0,
+                self._robot.data.body_state_w[:, self._body_id, 2].squeeze() < 0.0
+            )
         else:
-            if self.cfg.rotorpy_done:
-                died = torch.logical_or(torch.any(self._robot.data.root_vel_w[:,:].abs() > 100.0, dim=1), torch.any(self._robot.data.root_ang_vel_w[:,:].abs() > 100.0, dim=1))
+            died = torch.logical_or(
+                self._robot.data.root_pos_w[:, 2] < 0.1,
+                self._robot.data.root_pos_w[:, 2] > 10.0
+            )
+
+        # ADD: terminate on successful catch
+        ball_pos_w = self.ball.data.root_pos_w
+        base_pos_w = self._robot.data.root_pos_w
+        catch_success = torch.linalg.norm(ball_pos_w[:, :2] - base_pos_w[:, :2], dim=1) \
+                        < self.cfg.ball_error_threshold
+        died = torch.logical_or(died, catch_success)  # positive termination
+
+        if died[0] or timeout[0]:
+            print(f"[Isaac Env Dones] Died: {died[0].item()}, Timeout: {timeout[0].item()}, "
+                f"Catch: {catch_success[0].item()}")
+
+        return died, timeout
 
 
-                # Check if the robot has moved too far from the trajectory
-                died = torch.logical_or(died, torch.any(torch.abs(self._robot.data.root_pos_w[:, :] - self._pos_traj[0, :, :, 0]) > 4.0, dim=1))
 
-                # died = torch.logical_or(died, torch.abs(self._robot.data.root_pos_w[:, 2] ))
+    # def _reset_idx(self, env_ids: torch.Tensor | None):
+    #     if env_ids is None or len(env_ids) == self.num_envs:
+    #         env_ids = self._robot._ALL_INDICES
 
-                # import code; code.interact(local=locals())
-                # died = torch.logical_or(died, torch.any(torch.abs(self._robot.data.root_pos_w[:, :2] - self._terrain.env_origins[:,:2]) > 4.0, dim=1))
-            else:
-                died = torch.logical_or(self._robot.data.root_pos_w[:, 2] < 0.1, self._robot.data.body_state_w[:, self._body_id, 2].squeeze() < 0.0)
+    #     # Logging
+    #     base_pos_w, base_ori_w, lin_vel_w, ang_vel_w = self.get_frame_state_from_task(self.cfg.reward_task_body)
+    #     goal_pos_w, goal_ori_w = self.get_goal_state_from_task(self.cfg.reward_goal_body)
+    #     final_distance_to_goal = torch.linalg.norm(
+    #         goal_pos_w[env_ids] - base_pos_w[env_ids], dim=1
+    #     ).mean()
+    #     final_yaw_error = yaw_error_from_quats(
+    #         base_ori_w[env_ids], goal_ori_w[env_ids], 0
+    #     ).mean()
+    #     extras = dict()
+    #     for key in self._episode_sums.keys():
+    #         episodic_sum_avg = torch.mean(self._episode_sums[key][env_ids])
+    #         extras["Episode_Reward/" + key] = episodic_sum_avg / self.max_episode_length_s
+    #         self._episode_sums[key][env_ids] = 0.0
+    #     self.extras["log"] = dict()
+    #     self.extras["log"].update(extras)
+    #     extras = dict()
+    #     extras["Episode_Termination/died"] = torch.count_nonzero(self.reset_terminated[env_ids]).item()
+    #     extras["Episode_Termination/time_out"] = torch.count_nonzero(self.reset_time_outs[env_ids]).item()
+    #     extras["Metrics/final_distance_to_goal"] = final_distance_to_goal.item()
+    #     extras["Metrics/final_yaw_error_to_goal"] = final_yaw_error.item()
+    #     extras["Metrics/pos_radius"] = self.cfg.pos_radius
+    #     self.extras["log"].update(extras)
 
-        # Check if the robot is too high
-        # died = torch.logical_or(died, self._robot.data.root_pos_w[:, 2] > 10.0)
+    #     self._robot.reset(env_ids)
+    #     super()._reset_idx(env_ids)
+    #     if len(env_ids) == self.num_envs and not self.cfg.eval_mode:
+    #         # Spread out the resets to avoid spikes in training when many environments reset at a similar time
+    #         self.episode_length_buf = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
+    #     elif self.cfg.eval_mode:
+    #         self.episode_length_buf[env_ids] = 0
 
-        if died[0] or time_out[0]:
-            print("[Isaac Env: Dones] Robot has died: ", died[0].item(), " Time out: ", time_out[0].item())
-            print("[Isaac Env: Dones] Robot position: ", self._robot.data.root_pos_w[0] - self._pos_traj[0, 0, :, 0])
-            print("[Isaac Env: Dones] Robot velocity: ", self._robot.data.root_lin_vel_w[0])
-            print("[Isaac Env: Dones] Robot angular velocity: ", self._robot.data.root_ang_vel_w[0])
+
+    #     self._actions[env_ids] = 0.0
+    #     self._previous_action[env_ids] = 0.0
+    #     self._previous_omega_err[env_ids] = 0.0
+
+    #     # Update the trajectories for the reset environments
+    #     self.initialize_trajectories(env_ids)
+    #     self.update_goal_state()
+
+    #     # Sample a random goal at fixed height for each reset env
+    #     # Fixed z, random x and y in ranges
+    #     x_min, x_max = -2.0, 2.0
+    #     y_min, y_max = -2.0, 2.0
+    #     fixed_z = 1.0  # e.g. 1 m above ground
+
+    #     xy_low = torch.tensor([x_min, y_min], device=self.device)
+    #     xy_high = torch.tensor([x_max, y_max], device=self.device)
+
+    #     xy_rand = torch.rand(len(env_ids), 2, device=self.device) * (xy_high - xy_low) + xy_low
+    #     z_col = fixed_z * torch.ones(len(env_ids), 1, device=self.device)
+
+    #     # This is your new goal (ball) position
+    #     self._goal_pos_w[env_ids] = torch.cat([xy_rand, z_col], dim=-1)
+
+    #     # Optional: keep "desired" goal in sync for other code that reads it
+    #     self._desired_pos_w[env_ids] = self._goal_pos_w[env_ids]
+    #     self._desired_ori_w[env_ids] = torch.tensor([1.0, 0.0, 0.0, 0.0],
+    #                                                 device=self.device).repeat(len(env_ids), 1)
+
+    #     # Reset shaping state for these envs
+    #     self._prev_pos_error[env_ids] = torch.full((len(env_ids),), 10.0, device=self.device)
+    #     self._goal_respawn_steps[env_ids] = 0
 
         
-        return died, time_out
+    #     # Sample new commands
+    #     # if self.cfg.goal_cfg == "rand":
+    #     #     self._desired_pos_w[env_ids, :2] = torch.zeros_like(self._desired_pos_w[env_ids, :2]).uniform_(-2.0, 2.0)
+    #     #     self._desired_pos_w[env_ids, :2] += self._terrain.env_origins[env_ids, :2]
+    #     #     self._desired_pos_w[env_ids, 2] = torch.zeros_like(self._desired_pos_w[env_ids, 2]).uniform_(2.0, 4.0)
+    #     #     self._desired_ori_w[env_ids] = random_yaw_orientation(len(env_ids), device=self.device) 
+    #     # elif self.cfg.goal_cfg == "fixed":
+    #     #     self._desired_pos_w[env_ids] = torch.tensor(self.cfg.goal_pos, device=self.device).tile((env_ids.size(0), 1))
+    #     #     self._desired_pos_w[env_ids, :2] += self._terrain.env_origins[env_ids, :2]
+    #     #     self._desired_ori_w[env_ids] = torch.tensor(self.cfg.goal_ori, device=self.device).tile((env_ids.size(0), 1))
+    #     # # Reset robot state
+    #     # joint_pos = self._robot.data.default_joint_pos[env_ids]
+    #     # joint_vel = self._robot.data.default_joint_vel[env_ids]
+    #     # default_root_state = self._robot.data.default_root_state[env_ids]
+    #     # default_root_state[:, 2] = 3.0 # start at 3m height
+    #     # default_root_state[:, :3] += self._terrain.env_origins[env_ids]
+    #     # self._robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
+    #     # self._robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
+    #     # self._robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
 
-    def _reset_idx(self, env_ids: torch.Tensor | None):
-        if env_ids is None or len(env_ids) == self.num_envs:
-            env_ids = self._robot._ALL_INDICES
+    #     if self.cfg.init_cfg == "rand":
+    #         default_root_state = self._robot.data.default_root_state[env_ids]
+    #         # Initialize the robot on the trajectory with the correct velocity
+    #         traj_pos_start = self._pos_traj[0, env_ids, :, 0]
+    #         traj_vel_start = self._pos_traj[1, env_ids, :, 0]
+    #         traj_yaw_start = self._yaw_traj[0, env_ids, 0]
+    #         pos_rand = (torch.rand(len(env_ids), 3, device=self.device) * 2.0 - 1.0) * torch.tensor(self.cfg.init_pos_ranges, device=self.device).float()
+    #         vel_rand = (torch.rand(len(env_ids), 3, device=self.device) * 2.0 - 1.0) * torch.tensor(self.cfg.init_lin_vel_ranges, device=self.device).float()
+    #         yaw_rand = (torch.rand(len(env_ids), 1, device=self.device) * 2.0 - 1.0) * torch.tensor(self.cfg.init_yaw_ranges, device=self.device).float()
+    #         ang_vel_rand = (torch.rand(len(env_ids), 3, device=self.device) * 2.0 - 1.0) * torch.tensor(self.cfg.init_ang_vel_ranges, device=self.device).float()
+    #         init_yaw = math_utils.quat_from_yaw(traj_yaw_start + yaw_rand.squeeze(1))
 
-        # Logging
-        base_pos_w, base_ori_w, lin_vel_w, ang_vel_w = self.get_frame_state_from_task(self.cfg.reward_task_body)
-        goal_pos_w, goal_ori_w = self.get_goal_state_from_task(self.cfg.reward_goal_body)
-        final_distance_to_goal = torch.linalg.norm(
-            goal_pos_w[env_ids] - base_pos_w[env_ids], dim=1
-        ).mean()
-        final_yaw_error = yaw_error_from_quats(
-            base_ori_w[env_ids], goal_ori_w[env_ids], 0
-        ).mean()
-        extras = dict()
-        for key in self._episode_sums.keys():
-            episodic_sum_avg = torch.mean(self._episode_sums[key][env_ids])
-            extras["Episode_Reward/" + key] = episodic_sum_avg / self.max_episode_length_s
-            self._episode_sums[key][env_ids] = 0.0
-        self.extras["log"] = dict()
-        self.extras["log"].update(extras)
-        extras = dict()
-        extras["Episode_Termination/died"] = torch.count_nonzero(self.reset_terminated[env_ids]).item()
-        extras["Episode_Termination/time_out"] = torch.count_nonzero(self.reset_time_outs[env_ids]).item()
-        extras["Metrics/final_distance_to_goal"] = final_distance_to_goal.item()
-        extras["Metrics/final_yaw_error_to_goal"] = final_yaw_error.item()
-        extras["Metrics/pos_radius"] = self.cfg.pos_radius
-        self.extras["log"].update(extras)
+    #         default_root_state[:, :3] = traj_pos_start + pos_rand
+    #         default_root_state[:, 3:7] = init_yaw
+    #         default_root_state[:, 7:10] = traj_vel_start + vel_rand
+    #         default_root_state[:, 10:13] = ang_vel_rand
+    #         # default_root_state[:, :3] = traj_pos_start
+    #         # default_root_state[:, 3:7] = math_utils.quat_from_yaw(traj_yaw_start)
+    #         # default_root_state[:, 7:10] = traj_vel_start
+    #         # default_root_state[:, 10:13] = torch.zeros_like(traj_vel_start)
+    #     elif self.cfg.init_cfg == "fixed":
+    #         default_root_state = self._robot.data.default_root_state[env_ids]
+    #         default_root_state[:, :3] += self._terrain.env_origins[env_ids]
+    #         default_root_state[:, 2] = 3.0
 
-        self._robot.reset(env_ids)
-        super()._reset_idx(env_ids)
-        if len(env_ids) == self.num_envs and not self.cfg.eval_mode:
-            # Spread out the resets to avoid spikes in training when many environments reset at a similar time
-            self.episode_length_buf = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
-        elif self.cfg.eval_mode:
-            self.episode_length_buf[env_ids] = 0
-
-
-        self._actions[env_ids] = 0.0
-        self._previous_action[env_ids] = 0.0
-        self._previous_omega_err[env_ids] = 0.0
-        # Update the trajectories for the reset environments
-        self.initialize_trajectories(env_ids)
-        self.update_goal_state()
-        
-        # Sample new commands
-        # if self.cfg.goal_cfg == "rand":
-        #     self._desired_pos_w[env_ids, :2] = torch.zeros_like(self._desired_pos_w[env_ids, :2]).uniform_(-2.0, 2.0)
-        #     self._desired_pos_w[env_ids, :2] += self._terrain.env_origins[env_ids, :2]
-        #     self._desired_pos_w[env_ids, 2] = torch.zeros_like(self._desired_pos_w[env_ids, 2]).uniform_(2.0, 4.0)
-        #     self._desired_ori_w[env_ids] = random_yaw_orientation(len(env_ids), device=self.device) 
-        # elif self.cfg.goal_cfg == "fixed":
-        #     self._desired_pos_w[env_ids] = torch.tensor(self.cfg.goal_pos, device=self.device).tile((env_ids.size(0), 1))
-        #     self._desired_pos_w[env_ids, :2] += self._terrain.env_origins[env_ids, :2]
-        #     self._desired_ori_w[env_ids] = torch.tensor(self.cfg.goal_ori, device=self.device).tile((env_ids.size(0), 1))
-        # # Reset robot state
-        # joint_pos = self._robot.data.default_joint_pos[env_ids]
-        # joint_vel = self._robot.data.default_joint_vel[env_ids]
-        # default_root_state = self._robot.data.default_root_state[env_ids]
-        # default_root_state[:, 2] = 3.0 # start at 3m height
-        # default_root_state[:, :3] += self._terrain.env_origins[env_ids]
-        # self._robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
-        # self._robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
-        # self._robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
-
-        if self.cfg.init_cfg == "rand":
-            default_root_state = self._robot.data.default_root_state[env_ids]
-            # Initialize the robot on the trajectory with the correct velocity
-            traj_pos_start = self._pos_traj[0, env_ids, :, 0]
-            traj_vel_start = self._pos_traj[1, env_ids, :, 0]
-            traj_yaw_start = self._yaw_traj[0, env_ids, 0]
-            pos_rand = (torch.rand(len(env_ids), 3, device=self.device) * 2.0 - 1.0) * torch.tensor(self.cfg.init_pos_ranges, device=self.device).float()
-            vel_rand = (torch.rand(len(env_ids), 3, device=self.device) * 2.0 - 1.0) * torch.tensor(self.cfg.init_lin_vel_ranges, device=self.device).float()
-            yaw_rand = (torch.rand(len(env_ids), 1, device=self.device) * 2.0 - 1.0) * torch.tensor(self.cfg.init_yaw_ranges, device=self.device).float()
-            ang_vel_rand = (torch.rand(len(env_ids), 3, device=self.device) * 2.0 - 1.0) * torch.tensor(self.cfg.init_ang_vel_ranges, device=self.device).float()
-            init_yaw = math_utils.quat_from_yaw(traj_yaw_start + yaw_rand.squeeze(1))
-
-            default_root_state[:, :3] = traj_pos_start + pos_rand
-            default_root_state[:, 3:7] = init_yaw
-            default_root_state[:, 7:10] = traj_vel_start + vel_rand
-            default_root_state[:, 10:13] = ang_vel_rand
-            # default_root_state[:, :3] = traj_pos_start
-            # default_root_state[:, 3:7] = math_utils.quat_from_yaw(traj_yaw_start)
-            # default_root_state[:, 7:10] = traj_vel_start
-            # default_root_state[:, 10:13] = torch.zeros_like(traj_vel_start)
-        elif self.cfg.init_cfg == "fixed":
-            default_root_state = self._robot.data.default_root_state[env_ids]
-            default_root_state[:, :3] += self._terrain.env_origins[env_ids]
-            default_root_state[:, 2] = 3.0
-
-            # Initialize with -360 deg/s roll rate to test stabilization
-            init_vel = default_root_state[:, 7:10]
-            init_ang_vel_w = torch.zeros_like(default_root_state[:, 10:13], device=self.device)
-            init_ang_vel_w[:, 0] = -2.0 * math.pi  # -360 deg/s roll rate
-            init_ang_vel_b = isaac_math_utils.quat_rotate_inverse(default_root_state[:, 3:7], init_ang_vel_w)
-            default_root_state[:, 7:10] = init_vel
-            default_root_state[:, 10:13] = init_ang_vel_b
-            print("[Isaac Env: Reset] Initial angular velocity (world frame): ", init_ang_vel_w[0])
-            print("[Isaac Env: Reset] Initial angular velocity (body frame): ", init_ang_vel_b[0])
-            # Initialize the robot on the trajectory with the correct velocity
-            # default_root_state[:, :3] = self._desired_pos_w[env_ids]
-            # default_root_state[:, 3:7] = self._desired_ori_w[env_ids]
-        elif self.cfg.init_cfg == "rotorpy":
-            default_root_state = self._robot.data.default_root_state[env_ids]
+    #         # Initialize with -360 deg/s roll rate to test stabilization
+    #         init_vel = default_root_state[:, 7:10]
+    #         init_ang_vel_w = torch.zeros_like(default_root_state[:, 10:13], device=self.device)
+    #         init_ang_vel_w[:, 0] = -2.0 * math.pi  # -360 deg/s roll rate
+    #         init_ang_vel_b = isaac_math_utils.quat_rotate_inverse(default_root_state[:, 3:7], init_ang_vel_w)
+    #         default_root_state[:, 7:10] = init_vel
+    #         default_root_state[:, 10:13] = init_ang_vel_b
+    #         print("[Isaac Env: Reset] Initial angular velocity (world frame): ", init_ang_vel_w[0])
+    #         print("[Isaac Env: Reset] Initial angular velocity (body frame): ", init_ang_vel_b[0])
+    #         # Initialize the robot on the trajectory with the correct velocity
+    #         # default_root_state[:, :3] = self._desired_pos_w[env_ids]
+    #         # default_root_state[:, 3:7] = self._desired_ori_w[env_ids]
+    #     elif self.cfg.init_cfg == "rotorpy":
+    #         default_root_state = self._robot.data.default_root_state[env_ids]
             
-            traj_pos_start = self._pos_traj[0, env_ids, :, 0]
+    #         traj_pos_start = self._pos_traj[0, env_ids, :, 0]
 
-            default_root_state[:, :3] = (torch.rand(len(env_ids), 3, device=self.device) * 4.0 - 2.0) + traj_pos_start
-            # default_root_state[:, :3] += self._terrain.env_origins[env_ids]
-            random_roll = torch.rand(len(env_ids), 1, device=self.device) * self.cfg.init_euler_ranges[0] * 2.0 - self.cfg.init_euler_ranges[0]
-            random_pitch = torch.rand(len(env_ids), 1, device=self.device) * self.cfg.init_euler_ranges[1] * 2.0 - self.cfg.init_euler_ranges[1]
-            random_yaw = torch.rand(len(env_ids), 1, device=self.device) * self.cfg.init_euler_ranges[2] * 2.0 - self.cfg.init_euler_ranges[2]
-            default_root_state[:, 3:7] = isaac_math_utils.quat_from_euler_xyz(
-                random_roll.squeeze(), random_pitch.squeeze(), random_yaw.squeeze())
+    #         default_root_state[:, :3] = (torch.rand(len(env_ids), 3, device=self.device) * 4.0 - 2.0) + traj_pos_start
+    #         # default_root_state[:, :3] += self._terrain.env_origins[env_ids]
+    #         random_roll = torch.rand(len(env_ids), 1, device=self.device) * self.cfg.init_euler_ranges[0] * 2.0 - self.cfg.init_euler_ranges[0]
+    #         random_pitch = torch.rand(len(env_ids), 1, device=self.device) * self.cfg.init_euler_ranges[1] * 2.0 - self.cfg.init_euler_ranges[1]
+    #         random_yaw = torch.rand(len(env_ids), 1, device=self.device) * self.cfg.init_euler_ranges[2] * 2.0 - self.cfg.init_euler_ranges[2]
+    #         default_root_state[:, 3:7] = isaac_math_utils.quat_from_euler_xyz(
+    #             random_roll.squeeze(), random_pitch.squeeze(), random_yaw.squeeze())
 
-            default_root_state[:, 7:10] = torch.rand(len(env_ids), 3, device=self.device) * 3.0 - 1.5
-            default_root_state[:, 10:13] = torch.zeros(len(env_ids), 3, device=self.device)
+    #         default_root_state[:, 7:10] = torch.rand(len(env_ids), 3, device=self.device) * 3.0 - 1.5
+    #         default_root_state[:, 10:13] = torch.zeros(len(env_ids), 3, device=self.device)
 
-            self._action_history[env_ids] = torch.zeros(len(env_ids), self.cfg.action_history_length, 4, device=self.device)
-            self._state_history[env_ids] = torch.zeros(len(env_ids), self.cfg.state_history_length, 3, device=self.device)
+    #         self._action_history[env_ids] = torch.zeros(len(env_ids), self.cfg.action_history_length, 4, device=self.device)
+    #         self._state_history[env_ids] = torch.zeros(len(env_ids), self.cfg.state_history_length, 3, device=self.device)
 
-            if 0 in env_ids:
-                print("[Isaac Env: Reset] Default root state: ", default_root_state[0])
-                print("[Isaac Env: Reset] Desired pos: ", self._desired_pos_w[env_ids][0])
-                print("[Isaac Env: Reset] Action history: ", self._action_history[env_ids][0])
-                print("[Isaac Env: Reset] State history: ", self._state_history[env_ids][0])
-        else:
-            default_root_state = self._robot.data.default_root_state[env_ids]
-            # Initialize the robot on the trajectory with the correct velocity
-            default_root_state[:, :3] = self._desired_pos_w[env_ids]
-            default_root_state[:, 3:7] = self._desired_ori_w[env_ids]
-            default_root_state[:, 7:10] = self._pos_traj[1, env_ids, :, 0]
+    #         if 0 in env_ids:
+    #             print("[Isaac Env: Reset] Default root state: ", default_root_state[0])
+    #             print("[Isaac Env: Reset] Desired pos: ", self._desired_pos_w[env_ids][0])
+    #             print("[Isaac Env: Reset] Action history: ", self._action_history[env_ids][0])
+    #             print("[Isaac Env: Reset] State history: ", self._state_history[env_ids][0])
+    #     else:
+    #         default_root_state = self._robot.data.default_root_state[env_ids]
+    #         # Initialize the robot on the trajectory with the correct velocity
+    #         default_root_state[:, :3] = self._desired_pos_w[env_ids]
+    #         default_root_state[:, 3:7] = self._desired_ori_w[env_ids]
+    #         default_root_state[:, 7:10] = self._pos_traj[1, env_ids, :, 0]
 
-        self._robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids=env_ids)
-        self._robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids=env_ids)
+    #     self._robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids=env_ids)
+    #     self._robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids=env_ids)
 
         
-        self._motor_speeds[env_ids] = self.cfg.init_motor_speed * torch.ones_like(self._motor_speeds[env_ids])
+    #     self._motor_speeds[env_ids] = self.cfg.init_motor_speed * torch.ones_like(self._motor_speeds[env_ids])
         
-        # Domain Randomization
-        self.domain_randomization(env_ids)
+    #     # Domain Randomization
+    #     self.domain_randomization(env_ids)
 
-        # Reset action queue
-        hover_thrust = 2.0 / self._thrust_to_weight[env_ids] - 1.0
-        hover_actions = torch.zeros(len(env_ids), 4, device=self.device)
-        hover_actions[:, 0] = hover_thrust
-        self._action_queue[:,env_ids,:] = hover_actions.unsqueeze(0).repeat(self._action_queue.shape[0], 1, 1)
+    #     # Reset action queue
+    #     hover_thrust = 2.0 / self._thrust_to_weight[env_ids] - 1.0
+    #     hover_actions = torch.zeros(len(env_ids), 4, device=self.device)
+    #     hover_actions[:, 0] = hover_thrust
+    #     self._action_queue[:,env_ids,:] = hover_actions.unsqueeze(0).repeat(self._action_queue.shape[0], 1, 1)
+
+        def _reset_idx(self, env_ids: torch.Tensor | None):
+            if env_ids is None or len(env_ids) == self.num_envs:
+                env_ids = self._robot._ALL_INDICES
+
+            # ── 1. Logging ────────────────────────────────────────────────────────
+            base_pos_w, base_ori_w, lin_vel_w, ang_vel_w = self.get_frame_state_from_task(self.cfg.reward_task_body)
+            
+            # We use the ball as the ultimate "goal" for logging purposes
+            final_distance_to_goal = torch.linalg.norm(
+                self._ball_pos_w[env_ids] - base_pos_w[env_ids], dim=1
+            ).mean()
+            
+            final_yaw_error = yaw_error_from_quats(
+                base_ori_w[env_ids], self._ball_ori_w[env_ids], 0
+            ).mean()
+
+            extras = dict()
+            for key in self._episode_sums.keys():
+                episodic_sum_avg = torch.mean(self._episode_sums[key][env_ids])
+                extras["Episode_Reward/" + key] = episodic_sum_avg / self.max_episode_length_s
+                self._episode_sums[key][env_ids] = 0.0
+            
+            self.extras["log"] = dict()
+            self.extras["log"].update(extras)
+            
+            extras = dict()
+            extras["Episode_Termination/died"] = torch.count_nonzero(self.reset_terminated[env_ids]).item()
+            extras["Episode_Termination/time_out"] = torch.count_nonzero(self.reset_time_outs[env_ids]).item()
+            extras["Metrics/final_distance_to_goal"] = final_distance_to_goal.item()
+            extras["Metrics/final_yaw_error_to_goal"] = final_yaw_error.item()
+            extras["Metrics/pos_radius"] = self.cfg.pos_radius
+            self.extras["log"].update(extras)
+
+            # ── 2. Robot & Environment Step Buffer Resets ─────────────────────────
+            self._robot.reset(env_ids)
+            super()._reset_idx(env_ids)
+            if len(env_ids) == self.num_envs and not self.cfg.eval_mode:
+                # Spread out the resets to avoid spikes in training when many environments reset at a similar time
+                self.episode_length_buf = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
+            elif self.cfg.eval_mode:
+                self.episode_length_buf[env_ids] = 0
+
+            self._actions[env_ids] = 0.0
+            self._previous_action[env_ids] = 0.0
+            self._previous_omega_err[env_ids] = 0.0
+
+            # ── 3. Robot State Initialization ─────────────────────────────────────
+            if self.cfg.init_cfg == "rand":
+                default_root_state = self._robot.data.default_root_state[env_ids].clone()
+                pos_rand = (torch.rand(len(env_ids), 3, device=self.device) * 2.0 - 1.0) * torch.tensor(self.cfg.init_pos_ranges, device=self.device).float()
+                vel_rand = (torch.rand(len(env_ids), 3, device=self.device) * 2.0 - 1.0) * torch.tensor(self.cfg.init_lin_vel_ranges, device=self.device).float()
+                yaw_rand = (torch.rand(len(env_ids), 1, device=self.device) * 2.0 - 1.0) * torch.tensor(self.cfg.init_yaw_ranges, device=self.device).float()
+                ang_vel_rand = (torch.rand(len(env_ids), 3, device=self.device) * 2.0 - 1.0) * torch.tensor(self.cfg.init_ang_vel_ranges, device=self.device).float()
+                init_yaw = math_utils.quat_from_yaw(yaw_rand.squeeze(1))
+
+                default_root_state[:, :3] += self._terrain.env_origins[env_ids] + pos_rand
+                default_root_state[:, 2] = 3.0  # Start at 3m height
+                default_root_state[:, 3:7] = init_yaw
+                default_root_state[:, 7:10] = vel_rand
+                default_root_state[:, 10:13] = ang_vel_rand
+
+            elif self.cfg.init_cfg == "fixed":
+                default_root_state = self._robot.data.default_root_state[env_ids].clone()
+                default_root_state[:, :3] += self._terrain.env_origins[env_ids]
+                default_root_state[:, 2] = 3.0
+
+                # Initialize with -360 deg/s roll rate to test stabilization
+                init_vel = default_root_state[:, 7:10]
+                init_ang_vel_w = torch.zeros_like(default_root_state[:, 10:13], device=self.device)
+                init_ang_vel_w[:, 0] = -2.0 * math.pi  # -360 deg/s roll rate
+                init_ang_vel_b = isaac_math_utils.quat_apply_inverse(default_root_state[:, 3:7], init_ang_vel_w)
+                default_root_state[:, 7:10] = init_vel
+                default_root_state[:, 10:13] = init_ang_vel_b
+
+            elif self.cfg.init_cfg == "rotorpy":
+                default_root_state = self._robot.data.default_root_state[env_ids].clone()
+                default_root_state[:, :3] += self._terrain.env_origins[env_ids] + (torch.rand(len(env_ids), 3, device=self.device) * 4.0 - 2.0)
+                default_root_state[:, 2] = 3.0
+
+                random_roll = torch.rand(len(env_ids), 1, device=self.device) * self.cfg.init_euler_ranges[0] * 2.0 - self.cfg.init_euler_ranges[0]
+                random_pitch = torch.rand(len(env_ids), 1, device=self.device) * self.cfg.init_euler_ranges[1] * 2.0 - self.cfg.init_euler_ranges[1]
+                random_yaw = torch.rand(len(env_ids), 1, device=self.device) * self.cfg.init_euler_ranges[2] * 2.0 - self.cfg.init_euler_ranges[2]
+                default_root_state[:, 3:7] = isaac_math_utils.quat_from_euler_xyz(
+                    random_roll.squeeze(), random_pitch.squeeze(), random_yaw.squeeze())
+
+                default_root_state[:, 7:10] = torch.rand(len(env_ids), 3, device=self.device) * 3.0 - 1.5
+                default_root_state[:, 10:13] = torch.zeros(len(env_ids), 3, device=self.device)
+
+                self._action_history[env_ids] = torch.zeros(len(env_ids), self.cfg.action_history_length, 4, device=self.device)
+                self._state_history[env_ids] = torch.zeros(len(env_ids), self.cfg.state_history_length, 3, device=self.device)
+
+            else:
+                default_root_state = self._robot.data.default_root_state[env_ids].clone()
+                default_root_state[:, :3] += self._terrain.env_origins[env_ids]
+                default_root_state[:, 2] = 3.0
+
+            self._robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids=env_ids)
+            self._robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids=env_ids)
+
+            self._motor_speeds[env_ids] = self.cfg.init_motor_speed * torch.ones_like(self._motor_speeds[env_ids])
+            
+            # Domain Randomization
+            self.domain_randomization(env_ids)
+
+            # Reset action queue
+            hover_thrust = 2.0 / self._thrust_to_weight[env_ids] - 1.0
+            hover_actions = torch.zeros(len(env_ids), 4, device=self.device)
+            hover_actions[:, 0] = hover_thrust
+            self._action_queue[:, env_ids, :] = hover_actions.unsqueeze(0).repeat(self._action_queue.shape[0], 1, 1)
+
+
+            # ── 4. Ball Throw & Goal State Initialization ─────────────────────────
+            
+            # Reset ball state
+            default_ball_state = self.ball.data.default_root_state[env_ids, :7].clone()
+            default_ball_state[:, :3] = torch.zeros_like(default_ball_state[:, :3])
+            default_ball_state[:, 2] = self.terrain.env_origins[env_ids, 2]
+            default_ball_state[:, 2] += self.cfg.ball_throw_height * torch.ones(len(env_ids), device=self.device)
+            self.ball.write_root_pose_to_sim(default_ball_state[:, :7], env_ids=env_ids)
+
+            # Randomize ball velocity (simulate a throw)
+            default_ball_vel = self.ball.data.default_root_state[env_ids, 7:].clone()
+            default_ball_vel[:, :3] = torch.zeros_like(default_ball_vel[:, :3]).uniform_(
+                -self.cfg.ball_vel_horizontal, self.cfg.ball_vel_horizontal
+            )
+            v_min, v_max = self.cfg.ball_vel_vertical
+            default_ball_vel[:, 2] = torch.zeros(len(env_ids), device=self.device).uniform_(v_min, v_max)
+            self.ball.write_root_velocity_to_sim(default_ball_vel, env_ids=env_ids)
+
+            # Reset ball orientation randomly
+            self._ball_ori_w[env_ids] = random_orientation(env_ids.size(0), device=self.device)
+
+            # Set ball color to red (in-flight)
+            self.set_ball_color(env_ids, (1.0, 0.0, 0.0))
+
+            # Compute predicted catch point and time
+            self._catch_pose_w[env_ids] = self.get_catch_point(
+                default_ball_state[:, :3], default_ball_vel[:, :3], env_ids
+            )
+
+            # Sync desired_pos_w for other parts of code that read it (observations/rewards)
+            self._desired_pos_w[env_ids] = self._catch_pose_w[env_ids]
+            self._desired_ori_w[env_ids] = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(len(env_ids), 1)
+
+            # Reset position tracking shaping state
+            base_pos_w_updated = self._robot.data.root_pos_w[env_ids]
+            self._prev_pos_error[env_ids] = torch.linalg.norm(
+                self._catch_pose_w[env_ids] - base_pos_w_updated, dim=1
+            )
+
+    
     def initialize_trajectories(self, env_ids):
         """
         Initializes the trajectory for the environment ids.
@@ -1676,7 +2201,7 @@ class QuadrotorEnv(DirectRLEnv):
         elif body_name == "root":
             ang_vel_b = self._robot.data.root_ang_vel_b
         elif body_name == "endeffector":
-            ang_vel_b = quat_rotate_inverse(self._robot.data.body_quat_w[:, self._ee_id].squeeze(1), self._robot.data.body_ang_vel_w[:, self._ee_id].squeeze(1))
+            ang_vel_b = quat_apply_inverse(self._robot.data.body_quat_w[:, self._ee_id].squeeze(1), self._robot.data.body_ang_vel_w[:, self._ee_id].squeeze(1))
         else:
             raise NotImplementedError(f"Body name {body_name} is not implemented.")
         
@@ -1711,7 +2236,7 @@ class QuadrotorEnv(DirectRLEnv):
     
     def compute_desired_pose_from_transform(self, goal_pos_w, goal_ori_w, pos_transform):
         # Find b2 in the ori frame, set z component to 0 and the desired yaw is the atan2 of the x and y components
-        b2 = quat_rotate(goal_ori_w, torch.tensor([[0.0, 1.0, 0.0]], device=goal_ori_w.device).tile(goal_ori_w.shape[0], 1))
+        b2 = quat_apply(goal_ori_w, torch.tensor([[0.0, 1.0, 0.0]], device=goal_ori_w.device).tile(goal_ori_w.shape[0], 1))
         if self.cfg.num_joints == 0:
             b2[:, 2] = 0.0
         b2 = normalize(b2)
@@ -1726,13 +2251,38 @@ class QuadrotorEnv(DirectRLEnv):
         
         return pos_desired, yaw_desired
 
+    # def get_goal_state_from_task(self, goal_body:str) -> tuple[torch.Tensor, torch.Tensor]:
+    #     if goal_body == "root" or goal_body == "body":
+    #         goal_pos_w = self._desired_pos_w
+    #         goal_ori_w = self._desired_ori_w
+    #     elif goal_body == "endeffector":
+    #         goal_pos_w = self._desired_pos_w
+    #         goal_ori_w = self._desired_ori_w
+    #     elif goal_body == "COM":
+    #         # desired_pos, desired_yaw = self.compute_desired_pose_from_transform(self._desired_pos_w, self._desired_ori_w, self.com_pos_e)
+    #         desired_pos, desired_yaw = compute_desired_pose_from_transform(self._desired_pos_w, self._desired_ori_w, self.com_pos_e, 0)
+    #         goal_pos_w = desired_pos
+    #         goal_ori_w = quat_from_yaw(desired_yaw)
+    #     elif goal_body == "vehicle":
+    #         # desired_pos, desired_yaw = self.compute_desired_pose_from_transform(self._desired_pos_w, self._desired_ori_w, self.com_pos_e)
+    #         # desired_pos, desired_yaw = compute_desired_pose_from_transform(self._desired_pos_w, self._desired_ori_w, self.body_pos_ee_frame, 0)
+    #         # desired_pos_w is the ee in world frame, we want the corresponding body pos in world frame
+    #         desired_pos = self._desired_pos_w + quat_apply(self._desired_ori_w, self.body_pos_ee_frame)
+    #         # desired_pos = self._desired_pos_w + self.body_pos_ee_frame
+    #         # desired_pos = self._desired_pos_w
+    #         goal_pos_w = desired_pos
+    #         goal_ori_w = self._desired_ori_w
+    #     else:
+    #         raise ValueError("Invalid goal body: ", self.cfg.goal_body)
+
+    #     return goal_pos_w, goal_ori_w
     def get_goal_state_from_task(self, goal_body:str) -> tuple[torch.Tensor, torch.Tensor]:
         if goal_body == "root" or goal_body == "body":
-            goal_pos_w = self._desired_pos_w
-            goal_ori_w = self._desired_ori_w
+            goal_pos_w = self._goal_pos_w
+            goal_ori_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device).repeat(self.num_envs, 1)
         elif goal_body == "endeffector":
-            goal_pos_w = self._desired_pos_w
-            goal_ori_w = self._desired_ori_w
+            goal_pos_w = self._goal_pos_w
+            goal_ori_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device).repeat(self.num_envs, 1)
         elif goal_body == "COM":
             # desired_pos, desired_yaw = self.compute_desired_pose_from_transform(self._desired_pos_w, self._desired_ori_w, self.com_pos_e)
             desired_pos, desired_yaw = compute_desired_pose_from_transform(self._desired_pos_w, self._desired_ori_w, self.com_pos_e, 0)
