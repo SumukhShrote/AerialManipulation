@@ -515,7 +515,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
 
             if args_cli.follow_robot >= 0:
                 import matplotlib.pyplot as plt
-                import omni.isaac.lab.utils.math as isaac_math_utils
+                import isaaclab.utils.math as isaac_math_utils
                 quad_euler = isaac_math_utils.euler_xyz_from_quat(full_states[args_cli.follow_robot, :-1, 3:7])
                 quad_roll = quad_euler[0].cpu().numpy()
                 quad_pitch = quad_euler[1].cpu().numpy()

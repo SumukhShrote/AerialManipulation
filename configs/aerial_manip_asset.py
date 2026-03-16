@@ -644,7 +644,7 @@ AERIAL_MANIPULATOR_0DOF_DEBUG_BALL_CATCHING_CFG = ArticulationCfg(
 BALL_CFG = RigidObjectCfg(
     prim_path="{ENV_REGEX_NS}/Ball",
     spawn = SphereCfg(
-        radius=0.04,
+        radius=0.02,
         visual_material=PreviewSurfaceCfg(diffuse_color = (1.0, 0.0, 0.0)),
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
