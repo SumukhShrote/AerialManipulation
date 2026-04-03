@@ -229,18 +229,18 @@ class QuadrotorEnvCfg(DirectRLEnvCfg):
     scale_reward_with_time = True
 
     # near-goal weighting
-    near_goal_radius = 0.15
-    inner_hover_radius = 0.08
+    near_goal_radius = 0.12
+    inner_hover_radius = 0.07
 
-    vel_weight_base = 1.0
-    vel_weight_near = 0.4
-    vel_weight_inner = 0.6
+    vel_weight_base = 0.5
+    vel_weight_near = 0.35
+    vel_weight_inner = 0.5
 
-    ori_weight_base = 1.0
-    ori_weight_near = 0.3
+    ori_weight_base = 0.65
+    ori_weight_near = 0.35
     ori_weight_inner = 0.5
 
-    smooth_weight_base = 0.25
+    smooth_weight_base = 0.15
     smooth_weight_near = 0.75
     smooth_weight_inner = 1.0
 
@@ -250,10 +250,10 @@ class QuadrotorEnvCfg(DirectRLEnvCfg):
     hover_ori_denom = 0.12
 
     # reward mixing
-    pos_fine_mix = 0.5
+    pos_fine_mix = 0.75
     hover_quality_mix = 0.75
-    stay_alive_hover_mix = 0.3
-    action_norm_near_mix = 0.35
+    stay_alive_hover_mix = 0.25
+    action_norm_near_mix = 0.3
 
 
     ori_error_reward_scale = 0.0 # -0.5
