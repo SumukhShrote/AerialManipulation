@@ -323,8 +323,9 @@ class QuadrotorEnvCfg(DirectRLEnvCfg):
         'tau_m': 0.0,
         'kp_att': 0.0,
         'kd_att': 0.0,
+        'control_latency_steps': 0,
         }
-    control_latency_steps = 0 # number of timesteps for control latency
+    control_latency_steps = 12 # number of timesteps for control latency (estimated time delay 40ms)
 
     # Visualizations
     viz_mode = "triad" # or robot
@@ -524,13 +525,14 @@ class BrushlessQuadrotorManipulatorEnvCfg(QuadrotorEnvCfg):
         "mass": 0.05,         # +/- 5%
         "inertia": 0.10,      # +/- 10%
         "arm_length": 0.03,   # +/- 3%
-        "k_eta": 0.08,        # +/- 8%
-        "k_m": 0.0,           # leave off unless you trust this model
+        "k_eta": 0.1,         # +/- 10%
+        "k_m": 0.05,          # +/- 5%
         "k_torque": 0.08,     # +/- 8%
-        "tau_m": 0.15,        # +/- 15%
+        "tau_m": 0.20,        # +/- 15%
         "kp_att": 0.05,       # +/- 5%
         "kd_att": 0.05,       # +/- 5%
         "thrust_to_weight": 0.0,
+        'control_latency_steps': 4,
     }
 
     has_end_effector = True
@@ -558,6 +560,7 @@ class QuadrotorEnv(DirectRLEnv):
         self._nominal_action = torch.tensor([self._hover_thrust, 0.0, 0.0, 0.0], device=self.device).tile((self.num_envs, 1))
         self._previous_omega_err = torch.zeros(self.num_envs, 3, device=self.device)
         self._action_queue = torch.tensor([self._hover_thrust, 0.0, 0.0, 0.0], device=self.device).tile((self.cfg.control_latency_steps+1, self.num_envs, 1)) # for control latency
+        self._control_latency_steps = torch.ones(self.num_envs, dtype=torch.long, device=self.device) * self.cfg.control_latency_steps
 
         self._action_history = torch.zeros(self.num_envs, self.cfg.action_history_length, self.cfg.action_space, device=self.device)
         self._state_history = torch.zeros(self.num_envs, self.cfg.state_history_length, 3, device=self.device)
@@ -837,9 +840,16 @@ class QuadrotorEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor):
         # self._actions = actions.clone().clamp(-1.0, 1.0)
-        self._action_queue = torch.roll(self._action_queue, shifts=-1, dims=0) # roll the action queue to make room for the new action
-        self._action_queue[-1] = actions.clone().clamp(-1.0, 1.0) # add the new action to the end of the queue
-        self._actions = self._action_queue[0]
+        self._action_queue = torch.roll(self._action_queue, shifts=-1, dims=0)
+        self._action_queue[-1] = actions.clone().clamp(-1.0, 1.0)
+
+        delay_idx = torch.clamp(
+            self._control_latency_steps,
+            min=0,
+            max=self._action_queue.shape[0] - 1,
+        )
+        env_arange = torch.arange(self.num_envs, device=self.device)
+        self._actions = self._action_queue[delay_idx, env_arange]
 
         self._action_history = torch.roll(self._action_history, shifts=1, dims=1) # roll the action history to make room for the new action
         self._action_history[:, 0] = self._actions.clone().clamp(-1.0, 1.0) # add the new action to the history
@@ -1724,6 +1734,16 @@ class QuadrotorEnv(DirectRLEnv):
         self._motor_speeds[env_ids] = torch.sqrt(self._robot_weight[env_ids] / (4 * self._k_eta[env_ids])).unsqueeze(1).tile((1, 4)).to(self.device)
         self.max_thrust[env_ids] = self.cfg.motor_speed_max**2 * self._k_eta[env_ids]
 
+        if self.cfg.dr_dict.get("control_latency_steps", 0) > 0:
+            dr_range = int(self.cfg.dr_dict["control_latency_steps"])
+            low = max(0, int(self.cfg.control_latency_steps) - dr_range)
+            high = int(self.cfg.control_latency_steps) + dr_range + 1
+            self._control_latency_steps[env_ids] = torch.randint(
+                low, high, (env_ids.shape[0],), device=self.device
+            )
+        else:
+            self._control_latency_steps[env_ids] = int(self.cfg.control_latency_steps)
+
         if 0 in env_ids:
             print("[Isaac Env: Domain Randomization] Domain randomization applied:")
             print("[Isaac Env: Domain Randomization] Robot mass: ", self._robot_mass[env_ids][0])
@@ -1734,6 +1754,7 @@ class QuadrotorEnv(DirectRLEnv):
             print("[Isaac Env: Domain Randomization] kd_att: ", self._kd_att[env_ids][0])
             print("[Isaac Env: Domain Randomization] motor speeds: ", self._motor_speeds[env_ids][0])
             print("[Isaac Env: Domain Randomization] max thrust: ", self.max_thrust[env_ids][0])
+            print("[Isaac Env: Domain Randomization] control latency steps: ", self._control_latency_steps[env_ids][0])
 
     
     def reinitialize_motor_dynamics(self, env_ids: torch.Tensor | None = None):
