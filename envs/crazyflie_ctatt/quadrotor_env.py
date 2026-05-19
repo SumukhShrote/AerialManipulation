@@ -456,10 +456,13 @@ class BrushlessQuadrotorManipulatorEnvCfg(QuadrotorEnvCfg):
     robot: ArticulationCfg = CRAZYFLIE_BRUSHLESS_MANIPULATOR_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
     thrust_to_weight = 3.5
-    mass = 0.0442                  # 44.2 grams measured in real life with battery plugged in
-    Ixx = 2.68015e-5               # Calculated from sysID done on collected data
-    Iyy = 2.06085e-5               # Calculated from sysID done on collected data
-    Izz = 4.34276e-5               # Calculated from sysID done on collected data
+    mass = 0.046                   # 46.0 grams measured in real life with battery plugged in
+    # Ixx = 2.68015e-5               # Calculated from sysID done on collected data
+    # Iyy = 2.06085e-5               # Calculated from sysID done on collected data
+    # Izz = 4.34276e-5               # Calculated from sysID done on collected data
+    Ixx = 2.4255e-5             # Calculated from sysID done on collected data
+    Iyy = 1.865e-5              # Calculated from sysID done on collected data
+    Izz = 3.93e-5               # Calculated from sysID done on collected data
     sim_rate_hz = 1000
     decimation = 10 # 10x decimation from sim physics rate
     pd_loop_rate_hz = 500
@@ -486,8 +489,9 @@ class BrushlessQuadrotorManipulatorEnvCfg(QuadrotorEnvCfg):
     arm_length = 0.05
     k_eta = 0.31615 # Measured from thrust stand data
     k_m = 7.8e-10 #unchanged
-    k_torque = 2.567e-3 # Computed from sysID
-    tau_m = 0.045 # slower motor dynamics
+    # k_torque = 2.567e-3 # Computed from sysID
+    k_torque=3.987e-3 # Computed from sysID
+    tau_m = 0.050 # slower motor dynamics (Computed from sysID)
     motor_speed_min = 0.0
     motor_speed_max = 1.0
     init_motor_speed = 0.1 # should be 0.1 if using SRT control mode
@@ -522,16 +526,16 @@ class BrushlessQuadrotorManipulatorEnvCfg(QuadrotorEnvCfg):
     #     'kd_att': 0.0,
     # }
     dr_dict = {
-        "mass": 0.05,         # +/- 5%
-        "inertia": 0.10,      # +/- 10%
-        "arm_length": 0.03,   # +/- 3%
-        "k_eta": 0.1,         # +/- 10%
-        "k_m": 0.05,          # +/- 5%
-        "k_torque": 0.08,     # +/- 8%
-        "tau_m": 0.20,        # +/- 15%
-        "kp_att": 0.05,       # +/- 5%
-        "kd_att": 0.05,       # +/- 5%
-        "thrust_to_weight": 0.0,
+        "mass": 0.20,              # +/- 20%
+        "inertia": 0.20,           # +/- 20%
+        "arm_length": 0.05,        # +/- 5%
+        "k_eta": 0.20,             # +/- 20%
+        "k_m": 0.1,                # +/- 10%
+        "k_torque": 0.20,          # +/- 20%
+        "tau_m": 0.20,             # +/- 20%
+        "kp_att": 0.20,            # +/- 20%
+        "kd_att": 0.20,            # +/- 20%
+        "thrust_to_weight": 0.20,  # +/- 20%
         'control_latency_steps': 4,
     }
 
@@ -1251,7 +1255,7 @@ class QuadrotorEnv(DirectRLEnv):
         quad_pos_w, quad_ori_w, quad_lin_vel_w, quad_ang_vel_w = self.get_frame_state_from_task("body")
 
         if self.cfg.has_end_effector:
-            ee_pos_w, ee_ori_w, ee_lin_vel_w, ee_ang_vel_w = self.get_frame_state_from_task("root")
+            ee_pos_w, ee_ori_w, ee_lin_vel_w, ee_ang_vel_w = self.get_frame_state_from_task(self.cfg.task_body)
         else:
             ee_pos_w, ee_ori_w, ee_lin_vel_w, ee_ang_vel_w = self.get_frame_state_from_task("body")
         # print("[Isaac Env: Observations] Quad pos: ", quad_pos_w)

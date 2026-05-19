@@ -33,7 +33,8 @@ cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 # always enable cameras to record video
-args_cli.enable_cameras = True
+# args_cli.enable_cameras = True
+args_cli.enable_cameras = args_cli.video
 args_cli.headless = True # make false to see the simulation
 
 # clear out sys.argv for Hydra
@@ -526,18 +527,25 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
                 save_path = video_folder_path +"/" + video_name + ".png"
                 
                 fig = plt.figure(figsize=(10, 10))
-                plt.subplot(4, 3, 1)
+                
+                plt.subplot(4, 3, 1)                
                 plt.plot(x, quad_pos[:, 0], label="Quad X")
+                plt.plot(x, ee_pos[:, 0], label="EE X", linestyle="--")
                 plt.plot(x, goal_pos[:, 0], label="Goal X")
                 plt.legend(loc="best")
+                
                 plt.subplot(4, 3, 2)
                 plt.plot(x, quad_pos[:, 1], label="Quad Y")
+                plt.plot(x, ee_pos[:, 1], label="EE Y", linestyle="--")
                 plt.plot(x, goal_pos[:, 1], label="Goal Y")
                 plt.legend(loc="best")
+                
                 plt.subplot(4, 3, 3)
                 plt.plot(x, quad_pos[:, 2], label="Quad Z")
+                plt.plot(x, ee_pos[:, 2], label="EE Z", linestyle="--")
                 plt.plot(x, goal_pos[:, 2], label="Goal Z")
                 plt.legend(loc="best")
+
                 plt.subplot(4, 3, 4)
                 plt.plot(x, quad_vel[:, 0], label="Quad Vel X")
                 plt.legend(loc="best")

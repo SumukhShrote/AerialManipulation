@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
-Quacopter environment.
+Quadcopter environment.
 """
 
 import gymnasium as gym
@@ -46,7 +46,7 @@ gym.register(
 
 gym.register(
     id="Isaac-Crazyflie-0DOF-Hover-v0",
-    entry_point="envs.crazyflie_ctatt.quadrotor_env:QuadrotorEnv",
+    entry_point="envs.ball_catching.ball_catching_quadrotor_env:QuadrotorEnv",
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": BrushlessQuadrotorManipulatorEnvCfg,
