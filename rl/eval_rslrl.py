@@ -285,7 +285,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
                 if "Viz" in args_cli.save_prefix:
                     env_cfg.viewer.eye = (0, 0, 5.5)
                     env_cfg.viewer.lookat = (0, 0, 0)
-                    env_cfg.viewer.resulution = (720, 720)
+                    env_cfg.viewer.resolution = (720, 720)
                     # env_cfg.viewer.origin_type = "asset_root"
                     env_cfg.viewer.origin_type = "env"
                     env_cfg.viewer.env_index = args_cli.follow_robot
@@ -293,7 +293,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
                 else:
                     env_cfg.viewer.eye = (0.75, 0.75, 0.75)
                     env_cfg.viewer.lookat = (0.0, 0.0, 0.0)
-                    env_cfg.viewer.resulution = (1080, 1920)
+                    env_cfg.viewer.resolution = (1080, 1920)
                     env_cfg.viewer.origin_type = "asset_root"
                     env_cfg.viewer.env_index = args_cli.follow_robot
                     env_cfg.viewer.asset_name = "robot"
@@ -441,15 +441,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
 
         # Refresh GC models for mass, inertia and ttw
         # agent.reset_dr_terms(None, env.vehicle_mass, env.vehicle_inertia, env._thrust_to_weight)
+    # else:
+    #     # obs, dict_obs = envs.reset()
+    #     obs_dict = envs.get_observations()
+    #     # obs_dict = dict_obs['observations']
     else:
-        # obs, dict_obs = envs.reset()
-        obs_dict = envs.get_observations()
-        # obs_dict = dict_obs['observations']
+        # RslRlVecEnvWrapper returns a tuple: (obs, extras)
+        obs, extras = envs.get_observations()
+        # Extract the original dictionary from extras, or fallback to unwrapped env
+        obs_dict = extras.get("observations", envs.unwrapped._get_observations())
 
     print("Starting obs: ", obs_dict["full_state"])
 
     ee_start = obs_dict["full_state"][:, 13:16]
-    goal_start = obs_dict["full_state"][:, 26:26 + 3]
+    # goal_start = obs_dict["full_state"][:, 26:26 + 3]
+    goal_start = obs_dict["full_state"][:, 30:33]
     # print("starting norm: ", torch.norm(ee_start - goal_start, dim=1))
     # input("Check and press Enter to continue...")
     # import code; code.interact(local=locals())
@@ -475,21 +481,35 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
                 # print("Full State: ", obs_dict["full_state"][0, 33:])
 
                 start = time.time()
+                # if args_cli.baseline:
+                #     actions = agent.get_action(obs_dict["gc"])
+                # else:
+                #     actions = agent(obs_dict)
                 if args_cli.baseline:
                     actions = agent.get_action(obs_dict["gc"])
                 else:
-                    actions = agent(obs_dict)
+                    # Pass the policy tensor instead of the full dictionary
+                    actions = agent(obs_dict["policy"])
                 actions_log[:, steps] = actions
                 times.append(time.time() - start)
 
                 if args_cli.baseline:
                     obs_dict, reward, terminated, truncated, info = envs.step(actions)
                     done_count += terminated.sum().item() + truncated.sum().item()
+                    # done = bool((terminated | truncated).any().item())  # ADD THIS
+                # else:
+                #     obs_dict, reward, dones, extras = envs.step(actions)
+                #     # print("Reward: ", reward)
+                #     done_count += dones.sum().item()
+                #     # obs_dict = extras["observations"]
+                #     info = extras
                 else:
-                    obs_dict, reward, dones, extras = envs.step(actions)
-                    # print("Reward: ", reward)
+                    # Wrapper returns 4 values in your rsl_rl version: obs, reward, dones, extras
+                    obs, reward, dones, extras = envs.step(actions)
                     done_count += dones.sum().item()
-                    # obs_dict = extras["observations"]
+                    # done = bool(dones.any().item())  # ADD THIS
+                    # Extract the original dictionary for the next iteration
+                    obs_dict = extras.get("observations", envs.unwrapped._get_observations())
                     info = extras
                 rewards[:, steps] = reward.detach()
 
@@ -510,6 +530,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
             quad_ang_vel = full_states[args_cli.follow_robot, :-1, 10:13].cpu().numpy()
             ee_pos = full_states[args_cli.follow_robot, :-1, 13:16].cpu().numpy()
             goal_pos = full_states[args_cli.follow_robot, :-1, 26:26 + 3].cpu().numpy()
+            # goal_pos = full_states[args_cli.follow_robot, :-1, 30:33].cpu().numpy()
+            # Grab the timer from the exact end!
+            time_to_catch = full_states[args_cli.follow_robot, :-1, -1].cpu().numpy()
             
 
 
@@ -597,6 +620,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
                 save_path = video_folder_path + "/" + video_name + "_actions.png"
                 plt.savefig(save_path)
                 print(f"Saved actions plot to {save_path}")
+                plt.close(fig)
+
+                # Plot Time to Catch
+                fig = plt.figure(figsize=(8, 4))
+                plt.plot(x, time_to_catch, label="Time to Catch (s)", color='red')
+                plt.axhline(0.0, color="k", linestyle="--", label="Catch Moment")
+                plt.xlabel("Time (s)")
+                plt.ylabel("Seconds Remaining")
+                plt.title("Time-to-Catch Countdown")
+                plt.legend(loc="best")
+                plt.tight_layout()
+                save_path = video_folder_path + "/" + video_name + "_time_to_catch.png"
+                plt.savefig(save_path)
+                print(f"Saved timer plot to {save_path}")
                 plt.close(fig)
 
             envs.close()

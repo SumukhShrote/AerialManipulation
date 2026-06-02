@@ -536,6 +536,8 @@ class BrushlessQuadrotorManipulatorEnvCfg(QuadrotorEnvCfg):
         "kp_att": 0.20,            # +/- 20%
         "kd_att": 0.20,            # +/- 20%
         "thrust_to_weight": 0.20,  # +/- 20%
+        "kp_omega": 0.10,          # +/- 10%
+        "kd_omega": 0.10,          # +/- 10%
         'control_latency_steps': 4,
     }
 
