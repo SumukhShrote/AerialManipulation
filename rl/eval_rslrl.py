@@ -37,7 +37,7 @@ parser.add_argument(
 )
 
 
-# RL_MELLINGER_COMPARISON_BENCHMARK_V1
+# RL_B3_GEOMETRIC_COMPARISON_BENCHMARK_V1
 parser.add_argument(
     "--benchmark_pre_hover_s",
     type=float,
@@ -67,7 +67,7 @@ args_cli, hydra_args = parser.parse_known_args()
 
 
 # ============================================================================
-# MELLINGER_COMPARE_SINGLE_ENTRYPOINT_V1
+# B3_GEOMETRIC_COMPARE_SINGLE_ENTRYPOINT_V1
 #
 # User-facing behavior:
 #
@@ -140,7 +140,7 @@ if (
     # of the case and RL trace it produced.
     _fd, _manifest_path = (
         _compare_tempfile.mkstemp(
-            prefix="aerial_rl_mellinger_",
+            prefix="aerial_rl_b3_geometric_",
             suffix=".json",
         )
     )
@@ -498,7 +498,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
     agent_cfg.device = env_cfg.sim.device
 
     # =================================================================
-    # RL_MELLINGER_COMPARISON_BENCHMARK_V1
+    # RL_B3_GEOMETRIC_COMPARISON_BENCHMARK_V1
     # =================================================================
     comparison_measurement_episode_length_s = float(
         env_cfg.episode_length_s
@@ -868,7 +868,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
 
 
     # =================================================================
-    # RL_MELLINGER_COMPARISON_BENCHMARK_V1 — POST-RESET PREPARATION
+    # RL_B3_GEOMETRIC_COMPARISON_BENCHMARK_V1 — POST-RESET PREPARATION
     # =================================================================
     if args_cli.compare_b3_geometric:
         benchmark_env = envs.unwrapped
@@ -1375,7 +1375,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
     #   - this artifact will later be replayed in a separate Isaac
     #     process using the B3 geometric controller.
     # -----------------------------------------------------------------
-    mellinger_compare_case_path = None
+    b3_geometric_compare_case_path = None
 
     if args_cli.compare_b3_geometric:
         if args_cli.baseline:
@@ -1706,7 +1706,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
             exist_ok=True,
         )
 
-        mellinger_compare_case_path = os.path.join(
+        b3_geometric_compare_case_path = os.path.join(
             compare_dir,
             "rl_realized_case.pt",
         )
@@ -1794,7 +1794,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
                 "desired_ori_wxyz": desired_ori_w,
 
                 # Exact corresponding COM/body goal for Mellinger.
-                "mellinger_goal_pos_w": (
+                "b3_geometric_goal_pos_w": (
                     mellinger_goal_pos_w
                 ),
                 "mellinger_goal_ori_wxyz": (
@@ -1888,7 +1888,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
 
         torch.save(
             compare_case,
-            mellinger_compare_case_path,
+            b3_geometric_compare_case_path,
         )
 
         print()
@@ -1904,7 +1904,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
         )
         print(
             "case file               :",
-            mellinger_compare_case_path,
+            b3_geometric_compare_case_path,
         )
         print(
             "RL body start [m]       :",
@@ -1991,7 +1991,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
         print()
 
 
-    # MELLINGER_COMPARE_REPLAY_CASE_V2
+    # B3_GEOMETRIC_COMPARE_REPLAY_CASE_V2
     # ------------------------------------------------------------
     # Standardized exact-state payload consumed by the independent
     # Mellinger replay process. This remains completely opt-in.
@@ -2143,8 +2143,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
             )
 
         (
-            compare_mellinger_goal_pos_v2,
-            compare_mellinger_goal_ori_v2,
+            compare_b3_geometric_goal_pos_v2,
+            compare_b3_geometric_goal_ori_v2,
         ) = compare_env_v2.get_goal_state_from_task(
             "COM"
         )
@@ -2449,16 +2449,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
                     .cpu()
                     .clone()
                 ),
-                "mellinger_goal_pos_w": (
-                    compare_mellinger_goal_pos_v2[
+                "b3_geometric_goal_pos_w": (
+                    compare_b3_geometric_goal_pos_v2[
                         compare_robot_v2
                     ]
                     .detach()
                     .cpu()
                     .clone()
                 ),
-                "mellinger_goal_ori_w": (
-                    compare_mellinger_goal_ori_v2[
+                "b3_geometric_goal_ori_w": (
+                    compare_b3_geometric_goal_ori_v2[
                         compare_robot_v2
                     ]
                     .detach()
@@ -2639,23 +2639,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
             },
         }
 
-        # Clean controller-goal field names for the B3 geometric backend.
-        # Legacy aliases remain in the payload so older tooling/cases remain
-        # readable during this cleanup transition.
-        replay_case_v2["goal"]["b3_geometric_goal_pos_w"] = (
-            replay_case_v2["goal"]["mellinger_goal_pos_w"]
-            .detach()
-            .cpu()
-            .clone()
-        )
-        replay_case_v2["goal"]["b3_geometric_goal_ori_w"] = (
-            replay_case_v2["goal"]["mellinger_goal_ori_w"]
-            .detach()
-            .cpu()
-            .clone()
-        )
-
-        mellinger_replay_case_path = (
+        b3_geometric_replay_case_path = (
             os.path.join(
                 compare_dir_v2,
                 "b3_geometric_replay_case_v2.pt",
@@ -2664,13 +2648,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
 
         torch.save(
             replay_case_v2,
-            mellinger_replay_case_path,
+            b3_geometric_replay_case_path,
         )
 
         print()
         print(
             "[B3 geometric comparison] Exact replay case:",
-            mellinger_replay_case_path,
+            b3_geometric_replay_case_path,
         )
 
     print("Starting obs: ", obs_dict["full_state"])
@@ -2938,7 +2922,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
 
 
                 # ============================================================
-                # MELLINGER_COMPARE_SINGLE_ENTRYPOINT_V1
+                # B3_GEOMETRIC_COMPARE_SINGLE_ENTRYPOINT_V1
                 #
                 # If this evaluation was launched by the outer supervisor,
                 # publish only the paths required by the second Isaac process.
@@ -2961,7 +2945,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
                             compare_robot_v2
                         ),
                         "case_path": str(
-                            mellinger_replay_case_path
+                            b3_geometric_replay_case_path
                         ),
                         "rl_trace_path": str(
                             rl_trace_path_v2
@@ -3022,7 +3006,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
                     str(args_cli.task),
                     "--case_path",
                     str(
-                        mellinger_replay_case_path
+                        b3_geometric_replay_case_path
                     ),
                     "--rl_trace_path",
                     str(
