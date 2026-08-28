@@ -3502,9 +3502,59 @@ def main(
 
 
     def _apply_action_b3_sysid(self):
-        # SRT already populated _motor_speeds_des from the existing
-        # action path before this method is called.
+        # =============================================================
+        # B3_BEHAVIOR_GEOMETRIC_DIRECT_WRENCH_V2
+        #
+        # Behavior-geometric mode directly commands physical body
+        # wrench. PWM, motor lag, thrust-curve and SYSID machinery are
+        # completely bypassed.
+        # =============================================================
+        _behavior_wrench = getattr(
+            self,
+            "_b3_behavior_direct_wrench",
+            None,
+        )
 
+        if _behavior_wrench is not None:
+            wrench = _behavior_wrench.to(
+                device=self._thrust.device,
+                dtype=self._thrust.dtype,
+            )
+
+            if wrench.ndim == 1:
+                wrench = wrench.unsqueeze(0)
+
+            if (
+                wrench.ndim != 2
+                or wrench.shape[-1] != 4
+            ):
+                raise RuntimeError(
+                    "B3 behavior wrench must have shape "
+                    "(num_envs, 4); got "
+                    f"{tuple(wrench.shape)}"
+                )
+
+            self._thrust.zero_()
+            self._moment.zero_()
+
+            self._thrust[:, 0, 2] = wrench[:, 0]
+            self._moment[:, 0, :] = wrench[:, 1:]
+
+            self._robot.set_external_force_and_torque(
+                self._thrust,
+                self._moment,
+                body_ids=self._body_id,
+            )
+
+            # This is the only actuator-side quantity that physically
+            # exists in behavior-geometric mode.
+            self._b3_sysid_last_wrench = (
+                wrench.detach().clone()
+            )
+
+            return
+
+        # Legacy non-behavior path.
         self.pd_loop_counter += 1
 
         unified_des_delayed = None
@@ -3930,6 +3980,14 @@ def main(
             "1",
         ).strip() == "1"
     )
+
+    # Optional legacy Aug-06 measured-state overrides.
+    # Define these independently of deployment pre-hover so the clean
+    # behavior-geometric path can bypass firmware initialization entirely.
+    _b3_real_pregoal_error_text = None
+    _b3_real_rpy_text = None
+    _b3_real_lin_vel_text = None
+    _b3_real_ang_vel_text = None
 
     if b3_deployment_prehover:
         B3_PREHOVER_S = float(
@@ -6053,67 +6111,20 @@ def main(
             .cpu()
         )
 
-        action, firmware_step = (
-            controller.get_action_from_gc(
-                gc.clone(),
-                device=device,
+        # Behavior-geometric control has direct physical authority.
+        # The environment still requires a four-dimensional action,
+        # but its motor interpretation is irrelevant in this mode.
+        if b3_behavior_geom_enabled:
+            action = torch.zeros_like(
+                env._motor_speeds_des
             )
-        )
-
-        if not printed_firmware_first_step:
-            printed_firmware_first_step = True
-            print()
-            print("=" * 100)
-            print("ACTUAL CRAZYFLIE FIRMWARE FIRST CONTROL STEP")
-            print("=" * 100)
-            print(
-                "stabilizer tick :",
-                firmware_step["stabilizer_step"],
+        else:
+            action, _ = (
+                controller.get_action_from_gc(
+                    gc.clone(),
+                    device=device,
+                )
             )
-            print(
-                "legacy control  :",
-                [
-                    firmware_step["thrust"],
-                    firmware_step["roll"],
-                    firmware_step["pitch"],
-                    firmware_step["yaw"],
-                ],
-            )
-            print(
-                "firmware motors :",
-                firmware_step["motor_pwm"],
-            )
-            print(
-                "Isaac motor cmd :",
-                firmware_step["motor_normalized_isaac"],
-            )
-            print("=" * 100)
-
-        # B3_FIRMWARE_CHAIN_TRACE_V1
-        firmware_thrust_log.append(
-            float(firmware_step["thrust"])
-        )
-        firmware_roll_log.append(
-            float(firmware_step["roll"])
-        )
-        firmware_pitch_log.append(
-            float(firmware_step["pitch"])
-        )
-        firmware_yaw_log.append(
-            float(firmware_step["yaw"])
-        )
-        firmware_motor_pwm_log.append(
-            torch.as_tensor(
-                firmware_step["motor_pwm"],
-                dtype=torch.float32,
-            ).detach().cpu()
-        )
-        firmware_motor_normalized_isaac_log.append(
-            torch.as_tensor(
-                firmware_step["motor_normalized_isaac"],
-                dtype=torch.float32,
-            ).detach().cpu()
-        )
 
         # =============================================================
         # B3_BEHAVIOR_GEOMETRIC_WRENCH_STEP_V1
@@ -6238,7 +6249,10 @@ def main(
             )
         )
 
-        if not printed_b3_actuator_first_step:
+        if (
+            not b3_behavior_geom_enabled
+            and not printed_b3_actuator_first_step
+        ):
             printed_b3_actuator_first_step = True
 
             print()
@@ -6271,31 +6285,43 @@ def main(
             )
             print("=" * 100)
 
-        # B3_FIRMWARE_CHAIN_TRACE_V1
-        b3_u_des_log.append(
-            env._b3_sysid_last_u_des[0]
-            .detach()
-            .cpu()
-            .clone()
-        )
-        b3_u_after_lag_log.append(
-            env._b3_sysid_last_u[0]
-            .detach()
-            .cpu()
-            .clone()
-        )
-        b3_motor_forces_log.append(
-            env._b3_sysid_last_motor_forces[0]
-            .detach()
-            .cpu()
-            .clone()
-        )
-        b3_applied_wrench_log.append(
-            env._b3_sysid_last_wrench[0]
-            .detach()
-            .cpu()
-            .clone()
-        )
+        # Physical actuation trace.
+        #
+        # Behavior-geometric mode has no PWM command, lagged motor
+        # command, or per-motor force state.  Its actuator output is
+        # directly the body wrench applied to PhysX.
+        if b3_behavior_geom_enabled:
+            b3_applied_wrench_log.append(
+                env._b3_sysid_last_wrench[0]
+                .detach()
+                .cpu()
+                .clone()
+            )
+        else:
+            b3_u_des_log.append(
+                env._b3_sysid_last_u_des[0]
+                .detach()
+                .cpu()
+                .clone()
+            )
+            b3_u_after_lag_log.append(
+                env._b3_sysid_last_u[0]
+                .detach()
+                .cpu()
+                .clone()
+            )
+            b3_motor_forces_log.append(
+                env._b3_sysid_last_motor_forces[0]
+                .detach()
+                .cpu()
+                .clone()
+            )
+            b3_applied_wrench_log.append(
+                env._b3_sysid_last_wrench[0]
+                .detach()
+                .cpu()
+                .clone()
+            )
 
         motor_log.append(
             env._motor_speeds[0]
@@ -6501,29 +6527,51 @@ def main(
                 firmware_yaw_log,
                 dtype=torch.float32,
             ),
-            "firmware_motor_pwm": torch.stack(
-                firmware_motor_pwm_log,
-                dim=0,
+            "firmware_motor_pwm": (torch.stack(firmware_motor_pwm_log, dim=0) if firmware_motor_pwm_log else torch.empty((0, 4), dtype=torch.float32)),
+            "firmware_motor_normalized_isaac": (torch.stack(firmware_motor_normalized_isaac_log, dim=0) if firmware_motor_normalized_isaac_log else torch.empty((0, 4), dtype=torch.float32)),
+            "b3_actuator_u_des": (
+                torch.stack(
+                    b3_u_des_log,
+                    dim=0,
+                )
+                if b3_u_des_log
+                else torch.empty(
+                    (0, 4),
+                    dtype=torch.float32,
+                )
             ),
-            "firmware_motor_normalized_isaac": torch.stack(
-                firmware_motor_normalized_isaac_log,
-                dim=0,
+            "b3_actuator_u_after_lag": (
+                torch.stack(
+                    b3_u_after_lag_log,
+                    dim=0,
+                )
+                if b3_u_after_lag_log
+                else torch.empty(
+                    (0, 4),
+                    dtype=torch.float32,
+                )
             ),
-            "b3_actuator_u_des": torch.stack(
-                b3_u_des_log,
-                dim=0,
+            "b3_motor_forces_N": (
+                torch.stack(
+                    b3_motor_forces_log,
+                    dim=0,
+                )
+                if b3_motor_forces_log
+                else torch.empty(
+                    (0, 4),
+                    dtype=torch.float32,
+                )
             ),
-            "b3_actuator_u_after_lag": torch.stack(
-                b3_u_after_lag_log,
-                dim=0,
-            ),
-            "b3_motor_forces_N": torch.stack(
-                b3_motor_forces_log,
-                dim=0,
-            ),
-            "b3_applied_wrench": torch.stack(
-                b3_applied_wrench_log,
-                dim=0,
+            "b3_applied_wrench": (
+                torch.stack(
+                    b3_applied_wrench_log,
+                    dim=0,
+                )
+                if b3_applied_wrench_log
+                else torch.empty(
+                    (0, 4),
+                    dtype=torch.float32,
+                )
             ),
         },
         mellinger_trace_path,

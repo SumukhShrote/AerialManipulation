@@ -26,12 +26,12 @@ parser.add_argument("--case_study", type=bool, default=False, help="Use case stu
 parser.add_argument("--save_prefix", type=str, default="", help="Prefix for saving files.")
 parser.add_argument("--follow_robot", type=int, default=-1, help="Follow robot index.")
 parser.add_argument(
-    "--compare_mellinger",
+    "--compare_b3_geometric",
     action="store_true",
     default=False,
     help=(
         "Additionally capture the exact followed-robot case for a "
-        "side-by-side frozen-Mellinger replay. Existing RSL-RL "
+        "side-by-side B3 geometric replay. Existing RSL-RL "
         "evaluation behavior is unchanged."
     ),
 )
@@ -44,7 +44,7 @@ parser.add_argument(
     default=2.0,
     help=(
         "Policy-controlled RL hover duration before the "
-        "--compare_mellinger position step."
+        "--compare_b3_geometric position step."
     ),
 )
 parser.add_argument(
@@ -71,17 +71,17 @@ args_cli, hydra_args = parser.parse_known_args()
 #
 # User-facing behavior:
 #
-#   python -m rl.eval_rslrl ... --compare_mellinger
+#   python -m rl.eval_rslrl ... --compare_b3_geometric
 #
 # launches:
 #
 #   1. this normal RL evaluator in its own Isaac process;
-#   2. after that process has COMPLETELY exited, the exact matched Mellinger
+#   2. after that process has COMPLETELY exited, the exact matched B3 geometric
 #      replay in a fresh Isaac process.
 #
 # This outer invocation itself never starts Isaac.
 #
-# Runs WITHOUT --compare_mellinger follow the original evaluator path exactly.
+# Runs WITHOUT --compare_b3_geometric follow the original evaluator path exactly.
 # ============================================================================
 
 import json as _compare_json
@@ -101,12 +101,12 @@ _compare_is_rl_child = (
 
 
 if (
-    args_cli.compare_mellinger
+    args_cli.compare_b3_geometric
     and not _compare_is_rl_child
 ):
     if args_cli.follow_robot < 0:
         parser.error(
-            "--compare_mellinger requires "
+            "--compare_b3_geometric requires "
             "--follow_robot N."
         )
 
@@ -127,12 +127,12 @@ if (
     _compare_helper = (
         _compare_repo
         / "rl"
-        / "mellinger_rslrl_compare.py"
+        / "b3_geometric_rslrl_compare.py"
     )
 
     if not _compare_helper.is_file():
         raise RuntimeError(
-            "Internal Mellinger replay helper is missing: "
+            "Internal B3 geometric replay helper is missing: "
             f"{_compare_helper}"
         )
 
@@ -176,7 +176,7 @@ if (
 
     print()
     print("=" * 100)
-    print("RL + FROZEN MELLINGER — SINGLE ENTRYPOINT")
+    print("RL + B3 BEHAVIOR-GEOMETRIC — SINGLE ENTRYPOINT")
     print("=" * 100)
     print(
         "Selected robot :",
@@ -278,7 +278,7 @@ if (
     )
     print()
     print(
-        "Phase 2/2      : frozen Mellinger replay"
+        "Phase 2/2      : B3 behavior-geometric replay"
     )
     print(
         "Selected robot :",
@@ -291,18 +291,52 @@ if (
     print("=" * 100)
     print()
 
+    # ============================================================
+    # RL -> B3 BEHAVIOR-GEOMETRIC REPLAY
+    #
+    # The RL child has already written the exact replay case and RL
+    # trajectory.  The second process receives that captured task.
+    #
+    # No manually injected static goal is allowed here: the geometric
+    # controller must receive the same relative EE displacement realized
+    # by the RL benchmark.
+    # ============================================================
+    _geometric_env = _compare_os.environ.copy()
+
+    # Prevent a manual debugging goal from leaking into the production
+    # RL -> geometric comparison.
+    _geometric_env.pop(
+        "AERIAL_STATIC_GC_GOAL_OFFSET",
+        None,
+    )
+
+    _geometric_env.update(
+        {
+            "B3_BEHAVIOR_GEOM_ENABLE": "1",
+            "B3_PREHOVER_S": str(
+                args_cli.benchmark_pre_hover_s
+            ),
+            "B3_CONTINUE_FROM_PREHOVER": "1",
+            "B3_REAL_GOAL_DELIVERY_DELAY_S": "0",
+            "B3_GYRO_LPF_ENABLE": "0",
+            "B3_DIFF_ACTUATOR_ENABLE": "0",
+            "B3_UNIFIED_ACTUATOR_ENABLE": "0",
+            "B3_SIM_TRAJ_ENABLE": "0",
+        }
+    )
+
     try:
         _mellinger_result = (
             _compare_subprocess.run(
                 _mellinger_command,
                 cwd=str(_compare_repo),
-                env=_compare_os.environ.copy(),
+                env=_geometric_env,
             )
         )
 
         if _mellinger_result.returncode != 0:
             raise RuntimeError(
-                "Mellinger replay failed with "
+                "B3 behavior-geometric replay failed with "
                 f"return code "
                 f"{_mellinger_result.returncode}."
             )
@@ -318,7 +352,7 @@ if (
     print()
     print("=" * 100)
     print(
-        "RL + FROZEN MELLINGER COMPARISON COMPLETE"
+        "RL + B3 BEHAVIOR-GEOMETRIC COMPARISON COMPLETE"
     )
     print("=" * 100)
     print(
@@ -470,10 +504,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
         env_cfg.episode_length_s
     )
 
-    if args_cli.compare_mellinger:
+    if args_cli.compare_b3_geometric:
         if args_cli.baseline:
             raise ValueError(
-                "--compare_mellinger is for the trained RL policy, "
+                "--compare_b3_geometric is for the trained RL policy, "
                 "not --baseline."
             )
 
@@ -836,7 +870,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
     # =================================================================
     # RL_MELLINGER_COMPARISON_BENCHMARK_V1 — POST-RESET PREPARATION
     # =================================================================
-    if args_cli.compare_mellinger:
+    if args_cli.compare_b3_geometric:
         benchmark_env = envs.unwrapped
         benchmark_device = benchmark_env.device
         benchmark_idx = int(args_cli.follow_robot)
@@ -1339,20 +1373,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
     #   - normal eval_rslrl.py behavior is unchanged when the flag is
     #     absent;
     #   - this artifact will later be replayed in a separate Isaac
-    #     process using the frozen Mellinger controller.
+    #     process using the B3 geometric controller.
     # -----------------------------------------------------------------
     mellinger_compare_case_path = None
 
-    if args_cli.compare_mellinger:
+    if args_cli.compare_b3_geometric:
         if args_cli.baseline:
             raise ValueError(
-                "--compare_mellinger is intended for an RSL-RL policy "
+                "--compare_b3_geometric is intended for an RSL-RL policy "
                 "evaluation, not --baseline."
             )
 
         if args_cli.follow_robot < 0:
             raise ValueError(
-                "--compare_mellinger requires --follow_robot N."
+                "--compare_b3_geometric requires --follow_robot N."
             )
 
         compare_env = envs.unwrapped
@@ -1366,7 +1400,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
 
         if "Crazyflie" not in str(args_cli.task):
             raise ValueError(
-                "--compare_mellinger currently supports the Crazyflie "
+                "--compare_b3_geometric currently supports the Crazyflie "
                 "environment only."
             )
 
@@ -1664,7 +1698,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
         # -------------------------------------------------------------
         compare_dir = os.path.join(
             video_folder_path,
-            f"mellinger_compare_robot_{robot}",
+            f"b3_geometric_compare_robot_{robot}",
         )
 
         os.makedirs(
@@ -1962,16 +1996,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
     # Standardized exact-state payload consumed by the independent
     # Mellinger replay process. This remains completely opt-in.
     # ------------------------------------------------------------
-    if args_cli.compare_mellinger:
+    if args_cli.compare_b3_geometric:
         if args_cli.baseline:
             raise RuntimeError(
-                "--compare_mellinger is intended for an RL policy run, "
+                "--compare_b3_geometric is intended for an RL policy run, "
                 "not --baseline."
             )
 
         if args_cli.follow_robot < 0:
             raise RuntimeError(
-                "--compare_mellinger requires --follow_robot N."
+                "--compare_b3_geometric requires --follow_robot N."
             )
 
         compare_env_v2 = envs.unwrapped
@@ -1981,7 +2015,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
 
         compare_dir_v2 = os.path.join(
             video_folder_path,
-            f"mellinger_compare_robot_{compare_robot_v2}",
+            f"b3_geometric_compare_robot_{compare_robot_v2}",
         )
         os.makedirs(
             compare_dir_v2,
@@ -2208,7 +2242,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
             != selected_latency_index_v2
         ):
             print(
-                "[Mellinger comparison] RL latency index "
+                "[B3 geometric comparison] RL latency index "
                 f"clamped exactly as environment does: "
                 f"raw={raw_latency_index_v2}, "
                 f"effective={selected_latency_index_v2}, "
@@ -2605,10 +2639,26 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
             },
         }
 
+        # Clean controller-goal field names for the B3 geometric backend.
+        # Legacy aliases remain in the payload so older tooling/cases remain
+        # readable during this cleanup transition.
+        replay_case_v2["goal"]["b3_geometric_goal_pos_w"] = (
+            replay_case_v2["goal"]["mellinger_goal_pos_w"]
+            .detach()
+            .cpu()
+            .clone()
+        )
+        replay_case_v2["goal"]["b3_geometric_goal_ori_w"] = (
+            replay_case_v2["goal"]["mellinger_goal_ori_w"]
+            .detach()
+            .cpu()
+            .clone()
+        )
+
         mellinger_replay_case_path = (
             os.path.join(
                 compare_dir_v2,
-                "mellinger_replay_case_v2.pt",
+                "b3_geometric_replay_case_v2.pt",
             )
         )
 
@@ -2619,7 +2669,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
 
         print()
         print(
-            "[Mellinger comparison] Exact replay case:",
+            "[B3 geometric comparison] Exact replay case:",
             mellinger_replay_case_path,
         )
 
@@ -2631,7 +2681,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
     # print("starting norm: ", torch.norm(ee_start - goal_start, dim=1))
     # input("Check and press Enter to continue...")
     # import code; code.interact(local=locals())
-    if args_cli.compare_mellinger:
+    if args_cli.compare_b3_geometric:
         max_steps = int(
             comparison_measurement_episode_length_s
             * env_cfg.policy_rate_hz
@@ -2824,14 +2874,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
             # independent comparison process. Existing RL outputs above
             # remain untouched.
             # --------------------------------------------------------
-            if args_cli.compare_mellinger:
+            if args_cli.compare_b3_geometric:
                 compare_robot_v2 = int(
                     args_cli.follow_robot
                 )
 
                 compare_dir_v2 = os.path.join(
                     video_folder_path,
-                    f"mellinger_compare_robot_{compare_robot_v2}",
+                    f"b3_geometric_compare_robot_{compare_robot_v2}",
                 )
 
                 os.makedirs(
@@ -2882,7 +2932,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
 
                 print()
                 print(
-                    "[Mellinger comparison] RL trace:",
+                    "[B3 geometric comparison] RL trace:",
                     rl_trace_path_v2,
                 )
 
@@ -2939,7 +2989,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
                         )
 
                     print(
-                        "[Mellinger comparison] "
+                        "[B3 geometric comparison] "
                         "single-entrypoint handoff ready:",
                         comparison_manifest_path_v2,
                     )
@@ -2947,8 +2997,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
             envs.close()
             simulation_app.close()
 
-            if args_cli.compare_mellinger:
-                # The first Isaac/Omniverse application is now closed.
+            if (
+                args_cli.compare_b3_geometric
+                and not _compare_is_rl_child
+            ):
+                # Legacy direct-launch path.  The normal single-entrypoint
+                # pipeline never enters this branch: the outer supervisor
+                # owns phase-2 launch after the RL child has exited.
                 # Launching the replay as a subprocess prevents the
                 # second controller from sharing mutable simulator state
                 # with the RL rollout.
@@ -2957,7 +3012,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
                 helper_path_v2 = os.path.join(
                     "/home/sumukh/AerialManipulation",
                     "rl",
-                    "mellinger_rslrl_compare.py",
+                    "b3_geometric_rslrl_compare.py",
                 )
 
                 replay_command_v2 = [
@@ -3019,7 +3074,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: RslRlOnPolic
 
                 print()
                 print(
-                    "[Mellinger comparison] All artifacts:",
+                    "[B3 geometric comparison] All artifacts:",
                     compare_dir_v2,
                 )
 
